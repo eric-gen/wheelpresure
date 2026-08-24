@@ -415,12 +415,9 @@ function dropBoard(id,forget){
   refreshChrome();refresh();
 }
 
-/* mirrors _LinkButton.onPressed: nothing linked -> open chooser,
-   something linked -> unlink everything                                 */
-$('linkIcon').onclick=()=>{
-  if(boards.size>0){[...boards.keys()].forEach(id=>dropBoard(id,false));}
-  else linkNewBoard();
-};
+/* the icon always opens the OS chooser; unlinking happens per board
+   via the x on each chip in the status strip */
+$('linkIcon').onclick=()=>linkNewBoard();
 
 /* ---- silent re-hook of previously granted boards after reload -------- */
 async function autoReconnectKnown(){

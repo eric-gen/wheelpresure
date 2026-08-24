@@ -444,13 +444,18 @@ $('linkIcon').onclick=()=>linkNewBoard();
    browsers the OS forgets the grant when the app closes and the user
    must re-link via the chooser - we say so instead of failing quietly. */
 async function reconnectRemembered(verbose){
-  let known=null;
+  let known=null,derr='';
   try{
     if(navigator.bluetooth.getDevices)
       known=await navigator.bluetooth.getDevices();
-  }catch(e){}
+  }catch(e){derr=e.message}
   if(known===null){
-    if(verbose)warnNoMemory();
+    /* distinguish "API absent" from "API present but failing" */
+    if(verbose){
+      if(!('getDevices' in navigator.bluetooth))warnNoMemory();
+      else snack('Bluetooth memory error ('+derr+
+        ') - relink once, this becomes remembered from now on');
+    }
     return;
   }
   const mine=known.filter(d=>(d.name||'').startsWith(NAME_PREFIX));
@@ -461,10 +466,13 @@ async function reconnectRemembered(verbose){
     try{await hookBoard(dev);hooked++;}
     catch(e){onDrop(tireIdOf(dev));}          /* starts the retry loop */
   }
-  if(hooked===0&&verbose&&rememberedTires().length){
-    snack(mine.length
-      ?'Boards are away - reconnecting automatically...'
-      :'Boards not remembered - tap the bluetooth icon to link them');
+  if(verbose&&rememberedTires().length){
+    if(hooked>0)snack('Auto-reconnected: '+
+      [...boards.keys()].sort().join(', '));
+    else if(mine.length===0)
+      snack('No boards remembered yet by this browser - link each one once; '+
+        'reconnect is automatic from then on');
+    else snack('Boards are away - reconnecting automatically...');
   }
 }
 function autoReconnectKnown(){reconnectRemembered(true);}

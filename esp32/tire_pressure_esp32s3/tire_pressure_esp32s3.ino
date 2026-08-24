@@ -18,7 +18,7 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 
-#define TIRE_ID "FL"
+#define TIRE_ID "FR"
 
 #define SERVICE_UUID "5f1d16a0-046d-47fd-b49a-d6f1ae118f52"
 #define CHAR_UUID "5f1d16a1-046d-47fd-b49a-d6f1ae118f52"

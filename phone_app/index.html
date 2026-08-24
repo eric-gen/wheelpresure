@@ -54,6 +54,9 @@ body{background:var(--surface);color:var(--on-surface);
   border:1px solid var(--outline-variant);border-radius:12px;padding:1px 8px}
 #status .chip button{border:none;background:transparent;color:var(--on-surface-variant);
   font-size:13px;margin-left:4px;cursor:pointer;padding:0 2px}
+#status .addchip{border:1px dashed var(--outline);color:var(--primary);
+  background:transparent;border-radius:12px;padding:2px 10px;font-size:12px;
+  margin-left:8px;cursor:pointer}
 
 /* ================= warning banner ==================================== */
 #banner{display:none;background:var(--error);color:var(--on-error);
@@ -194,6 +197,7 @@ const ICONS={
 let pressures={FL:2.3,FR:2.3,RL:2.5,RR:2.5};
 /* tireId -> {dev, ch, retryTimer, retrying} */
 const boards=new Map();
+const manualDrops=new WeakSet();   /* devices the user unlinked on purpose */
 let target=null,editingAll=false;
 const $=id=>document.getElementById(id);
 
@@ -214,13 +218,16 @@ function refreshChrome(){
     st.classList.add('show');return;
   }
   setPhase(pendingRetries()>0?'searching':'connected');
+  /* explicit add-button: linking board 2..n never means unlinking board 1 */
   st.innerHTML='Linked: '+names.map(id=>
     '<span class="chip">'+id+
-    '<button data-drop="'+id+'" aria-label="unlink '+id+'">&#x2715;</button></span>').join('');
+    '<button data-drop="'+id+'" aria-label="unlink '+id+'">&#x2715;</button></span>').join('')+
+    '<button id="addBtn" class="addchip">+ add</button>';
   st.classList.add('show');
   st.querySelectorAll('[data-drop]').forEach(b=>{
     b.onclick=()=>dropBoard(b.dataset.drop,true);
   });
+  $('addBtn').onclick=linkNewBoard;
 }
 function pendingRetries(){
   let n=0;boards.forEach(b=>{if(b.retrying)n++;});return n;
@@ -367,6 +374,11 @@ function onDrop(id){
   const b=boards.get(id);
   if(!b)return;
   boards.delete(id);
+  if(manualDrops.has(b.dev)){
+    /* user unlinked this one on purpose - do NOT auto-reconnect it */
+    refreshChrome();refresh();
+    return;
+  }
   scheduleRetry(b.dev,id);            /* mirrors classic_manager._retryTimers */
   refreshChrome();refresh();
 }
@@ -394,6 +406,7 @@ function cur_retry(entry,tick){
 function dropBoard(id,forget){
   const b=boards.get(id);
   if(b){
+    manualDrops.add(b.dev);           /* suppress the auto-reconnect loop */
     clearInterval(b.retryTimer);
     try{b.dev.gatt.disconnect();}catch(e){}
     if(forget&&b.dev.forget)b.dev.forget();       /* so the chooser offers it fresh */

@@ -14,6 +14,7 @@
 //   3. The BLE library used here ships with the esp32 board package
 //   4. Flash, then open Serial Monitor at 115200 baud
 
+#include <BLE2902.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
@@ -68,6 +69,9 @@ class TireWriteCallback : public BLECharacteristicCallbacks {
     }
     const float bar = parts[myIndex].toFloat();
     Serial.printf("[BLE] %s pressure received: %.1f bar\n", TIRE_ID, bar);
+    // Tell the app this board applied its slot.
+    pCharacteristic->setValue(String("ACK:") + TIRE_ID);
+    pCharacteristic->notify();
   }
 };
 
@@ -86,7 +90,10 @@ void setup() {
   BLEService *service = server->createService(SERVICE_UUID);
 
   BLECharacteristic *characteristic = service->createCharacteristic(
-      CHAR_UUID, BLECharacteristic::PROPERTY_WRITE);
+      CHAR_UUID,
+      BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
+  // Required so iOS/Android can subscribe to the ACK notifications.
+  characteristic->addDescriptor(new BLE2902());
   characteristic->setCallbacks(new TireWriteCallback());
 
   service->start();

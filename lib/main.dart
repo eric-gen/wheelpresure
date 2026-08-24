@@ -3,7 +3,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import 'classic_manager.dart';
+import 'link.dart';
 
 void main() {
   FlutterError.onError = (details) {
@@ -61,20 +61,20 @@ class _OverviewScreenState extends State<OverviewScreen> {
   @override
   void initState() {
     super.initState();
-    ClassicManager.instance.message.addListener(_showBleMessage);
+    LinkManager.instance.message.addListener(_showBleMessage);
     if (kDebugMode) {
       Future.delayed(const Duration(seconds: 3), () {
-        if (ClassicManager.instance.state.value.phase == LinkPhase.disconnected) {
-          ClassicManager.instance.connect();
+        if (LinkManager.instance.state.value.phase == LinkPhase.disconnected) {
+          LinkManager.instance.connect();
         }
       });
     }
   }
 
   void _showBleMessage() {
-    final msg = ClassicManager.instance.message.value;
+    final msg = LinkManager.instance.message.value;
     if (msg == null || !mounted) return;
-    ClassicManager.instance.message.value = null;
+    LinkManager.instance.message.value = null;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), duration: const Duration(seconds: 3)),
     );
@@ -82,7 +82,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
 
   @override
   void dispose() {
-    ClassicManager.instance.message.removeListener(_showBleMessage);
+    LinkManager.instance.message.removeListener(_showBleMessage);
     super.dispose();
   }
 
@@ -91,7 +91,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
 
   Future<void> _editPressure({int? index}) async {
     final isAll = index == null;
-    final linked = ClassicManager.instance.state.value.tires;
+    final linked = LinkManager.instance.state.value.tires;
     if (isAll) {
       final missing = [
         for (final t in _tires)
@@ -129,7 +129,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
     });
     // One message with every pressure, fixed order FL,FR,RL,RR:
     // "2.4,3.4,1.2,2.5". Boards pick their own slot by TIRE_ID.
-    ClassicManager.instance.sendPressures([
+    LinkManager.instance.sendPressures([
       for (final t in _tires) t.pressure,
     ]);
   }
@@ -151,7 +151,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
       body: Column(
         children: [
           ValueListenableBuilder<Set<String>>(
-            valueListenable: ClassicManager.instance.unackedBoards,
+            valueListenable: LinkManager.instance.unackedBoards,
             builder: (context, unacked, _) {
               if (unacked.isEmpty) return const SizedBox.shrink();
               return _warningBanner(unacked.toList()..sort());
@@ -160,7 +160,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
           Expanded(
             child: Center(
               child: ListenableBuilder(
-                listenable: ClassicManager.instance.state,
+                listenable: LinkManager.instance.state,
                 builder: (context, _) => AspectRatio(
                   aspectRatio: 379 / 212,
                   child: LayoutBuilder(
@@ -205,7 +205,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
         trailing: IconButton(
           icon: Icon(Icons.close, color: scheme.onError),
           onPressed:
-              () => ClassicManager.instance.unackedBoards.value = const {},
+              () => LinkManager.instance.unackedBoards.value = const {},
         ),
       ),
     );
@@ -301,7 +301,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
   Widget _tireAt(double s, String name, double x, double y) {
     final scheme = Theme.of(context).colorScheme;
     final tire = _tires.firstWhere((t) => t.name == name);
-    final linked = ClassicManager.instance.state.value.tires.contains(name);
+    final linked = LinkManager.instance.state.value.tires.contains(name);
     return Positioned(
       left: x * s,
       top: y * s,
@@ -467,9 +467,9 @@ class _LinkButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: ClassicManager.instance.state,
+      listenable: LinkManager.instance.state,
       builder: (context, _) {
-        final state = ClassicManager.instance.state.value;
+        final state = LinkManager.instance.state.value;
         final (icon, tooltip) = switch (state.phase) {
           LinkPhase.connected => (
             Icons.bluetooth_connected,
@@ -486,10 +486,10 @@ class _LinkButton extends StatelessWidget {
         };
         return IconButton(
           onPressed: () {
-            if (ClassicManager.instance.isConnected) {
-              ClassicManager.instance.disconnect();
+            if (LinkManager.instance.isConnected) {
+              LinkManager.instance.disconnect();
             } else if (state.phase == LinkPhase.disconnected) {
-              ClassicManager.instance.connect();
+              LinkManager.instance.connect();
             }
           },
           icon: Icon(icon),

@@ -5,35 +5,25 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_bluetooth_serial_plus/flutter_bluetooth_serial_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-enum LinkPhase { disconnected, scanning, connecting, connected }
-
-class LinkState {
-  const LinkState({
-    this.phase = LinkPhase.disconnected,
-    this.tires = const <String>{},
-  });
-
-  final LinkPhase phase;
-  final Set<String> tires;
-
-  LinkState copyWith({LinkPhase? phase, Set<String>? tires}) =>
-      LinkState(phase: phase ?? this.phase, tires: tires ?? this.tires);
-}
+import 'link.dart';
 
 /// Bluetooth Classic (SPP) transport - requires ESP32 boards with the
 /// original chip (e.g. WROVER-E); the S3 cannot do Bluetooth Classic.
-class ClassicManager {
+class ClassicManager implements LinkManager {
   ClassicManager._();
   static final instance = ClassicManager._();
 
   /// Boards advertise this name; app tells them apart by the suffix.
   static const prefix = 'TireESP32';
 
+@override
   final state = ValueNotifier<LinkState>(const LinkState());
+@override
   final message = ValueNotifier<String?>(null);
 
   /// Boards that got a write but never acknowledged it - drives the red
   /// warning banner in the UI.
+@override
   final unackedBoards = ValueNotifier<Set<String>>(const <String>{});
 
   static const ackTimeout = Duration(milliseconds: 1500);
@@ -45,8 +35,10 @@ class ClassicManager {
   Set<String> _pendingAcks = const <String>{};
   bool _userDisconnected = false;
 
+  @override
   bool get isConnected => _conns.isNotEmpty;
 
+  @override
   Future<void> connect() async {
     if (state.value.phase != LinkPhase.disconnected) return;
     try {
@@ -219,6 +211,7 @@ class ClassicManager {
     debugPrint('Classic: lost $key');
   }
 
+@override
   Future<void> disconnect() async {
     _userDisconnected = true;
     for (final t in _retryTimers.values) {
@@ -242,6 +235,7 @@ class ClassicManager {
   /// "2.4,3.4,1.2,2.5\n". Written to every connected board; each board
   /// picks its own slot by its TIRE_ID and replies "ACK:`<TIRE_ID>`".
   /// Boards that stay silent land in [unackedBoards] (red warning).
+@override
   Future<void> sendPressures(List<double> pressures) async {
     if (!isConnected || pressures.isEmpty) return;
     final payload =

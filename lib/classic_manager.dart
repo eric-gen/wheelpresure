@@ -32,11 +32,18 @@ class ClassicManager {
   final state = ValueNotifier<LinkState>(const LinkState());
   final message = ValueNotifier<String?>(null);
 
+  /// Boards that got a write but never acknowledged it - drives the red
+  /// warning banner in the UI.
+  final unackedBoards = ValueNotifier<Set<String>>(const <String>{});
+
+  static const ackTimeout = Duration(milliseconds: 1500);
+
   final Map<String, BluetoothConnection> _conns = {};
   final Map<String, String> _knownAddresses = {};
   final Map<String, Timer> _retryTimers = {};
+  final Map<String, String> _rxBuffers = {};
+  Set<String> _pendingAcks = const <String>{};
   bool _userDisconnected = false;
-  String _rxBuffer = '';
 
   bool get isConnected => _conns.isNotEmpty;
 
@@ -120,15 +127,20 @@ class ClassicManager {
     }
   }
 
-  void _onData(Uint8List data) {
-    // Boards are write-only today; buffer anyway in case they reply later.
-    _rxBuffer += utf8.decode(data, allowMalformed: true);
+  void _onData(String key, Uint8List data) {
+    var buffer =
+        (_rxBuffers[key] ?? '') + utf8.decode(data, allowMalformed: true);
     int index;
-    while ((index = _rxBuffer.indexOf('\n')) >= 0) {
-      final line = _rxBuffer.substring(0, index).trim();
-      _rxBuffer = _rxBuffer.substring(index + 1);
-      debugPrint('Classic received: "$line"');
+    while ((index = buffer.indexOf('\n')) >= 0) {
+      final line = buffer.substring(0, index).trim();
+      buffer = buffer.substring(index + 1);
+      debugPrint('Classic [$key] received: "$line"');
+      if (line == 'ACK:$key') {
+        _pendingAcks = {..._pendingAcks}..remove(key);
+      }
+      // (future: handle other board replies here)
     }
+    _rxBuffers[key] = buffer;
   }
 
   String? _keyFromName(String? name) {
@@ -146,13 +158,16 @@ class ClassicManager {
     _retryTimers.remove(key)?.cancel();
     _conns[key] = conn;
     conn.input.listen(
-      _onData,
+      (data) => _onData(key, data),
       onDone: () => _remove(key),
       onError: (_) => _remove(key),
     );
     state.value = state.value.copyWith(tires: {...state.value.tires, key});
     if (state.value.phase == LinkPhase.disconnected) {
       _setPhase(LinkPhase.connected);
+    }
+    if (unackedBoards.value.contains(key)) {
+      unackedBoards.value = {...unackedBoards.value}..remove(key);
     }
   }
 
@@ -186,6 +201,11 @@ class ClassicManager {
     try {
       conn?.close();
     } catch (_) {}
+    _rxBuffers.remove(key);
+    if (_pendingAcks.contains(key)) {
+      _pendingAcks = {..._pendingAcks}..remove(key);
+      // Lost mid-send: not "unacked", it's simply gone (UI already dims it).
+    }
     final tires = {...state.value.tires}..remove(key);
     state.value = LinkState(
       phase: tires.isEmpty ? LinkPhase.disconnected : LinkPhase.connected,
@@ -207,6 +227,8 @@ class ClassicManager {
     _retryTimers.clear();
     final conns = Map.of(_conns);
     _conns.clear();
+    _rxBuffers.clear();
+    unackedBoards.value = const <String>{};
     state.value = const LinkState();
     for (final c in conns.values) {
       try {
@@ -218,18 +240,29 @@ class ClassicManager {
 
   /// Sends all four pressures in one message, fixed order FL,FR,RL,RR:
   /// "2.4,3.4,1.2,2.5\n". Written to every connected board; each board
-  /// picks its own slot by its TIRE_ID.
+  /// picks its own slot by its TIRE_ID and replies "ACK:`<TIRE_ID>`".
+  /// Boards that stay silent land in [unackedBoards] (red warning).
   Future<void> sendPressures(List<double> pressures) async {
     if (!isConnected || pressures.isEmpty) return;
     final payload =
         '${pressures.map((p) => p.toStringAsFixed(1)).join(',')}\n';
-    for (final k in _conns.keys.toList()) {
+    final targets = _conns.keys.toList();
+    _pendingAcks = {...targets};
+    final writeFailed = <String>{};
+    for (final k in targets) {
       try {
         _conns[k]!.output.add(utf8.encode(payload));
         await _conns[k]!.output.allSent;
       } catch (e) {
         debugPrint('Classic write to $k failed: $e');
+        writeFailed.add(k);
       }
+    }
+    await Future<void>.delayed(ackTimeout);
+    final failed = {...writeFailed, ..._pendingAcks};
+    unackedBoards.value = failed;
+    if (failed.isEmpty) {
+      debugPrint('Classic: all boards acknowledged: $targets');
     }
   }
 }

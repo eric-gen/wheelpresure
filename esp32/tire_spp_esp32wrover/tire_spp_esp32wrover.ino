@@ -52,6 +52,8 @@ void handleLine(const String &line) {
   }
   const float bar = parts[myIndex].toFloat();
   Serial.printf("[SPP] %s pressure received: %.1f bar\n", TIRE_ID, bar);
+  // Tell the app this board applied its slot.
+  SerialBT.println(String("ACK:") + TIRE_ID);
 }
 
 void setup() {

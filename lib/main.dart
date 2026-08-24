@@ -1,9 +1,19 @@
+import 'dart:ui';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'classic_manager.dart';
 
 void main() {
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    debugPrint('FLUTTER ERROR: ${details.exception}\n${details.stack}');
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('UNCAUGHT ERROR: $error\n$stack');
+    return true;
+  };
   runApp(const TireApp());
 }
 
@@ -138,27 +148,64 @@ class _OverviewScreenState extends State<OverviewScreen> {
         title: const Text('Tire Pressure'),
         actions: const [_LinkButton()],
       ),
-      body: Center(
-        child: ListenableBuilder(
-          listenable: ClassicManager.instance.state,
-          builder: (context, _) => AspectRatio(
-            aspectRatio: 379 / 212,
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final s = constraints.maxWidth / 379;
-                return Stack(
-                  children: [
-                    _buildVehicle(s),
-                    _buildSetAllButton(s),
-                    _tireAt(s, 'FL', 68, 42),
-                    _tireAt(s, 'FR', 281, 42),
-                    _tireAt(s, 'RL', 68, 138),
-                    _tireAt(s, 'RR', 281, 138),
-                  ],
-                );
-              },
+      body: Column(
+        children: [
+          ValueListenableBuilder<Set<String>>(
+            valueListenable: ClassicManager.instance.unackedBoards,
+            builder: (context, unacked, _) {
+              if (unacked.isEmpty) return const SizedBox.shrink();
+              return _warningBanner(unacked.toList()..sort());
+            },
+          ),
+          Expanded(
+            child: Center(
+              child: ListenableBuilder(
+                listenable: ClassicManager.instance.state,
+                builder: (context, _) => AspectRatio(
+                  aspectRatio: 379 / 212,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final s = constraints.maxWidth / 379;
+                      return Stack(
+                        children: [
+                          _buildVehicle(s),
+                          _buildSetAllButton(s),
+                          _tireAt(s, 'FL', 68, 42),
+                          _tireAt(s, 'FR', 281, 42),
+                          _tireAt(s, 'RL', 68, 138),
+                          _tireAt(s, 'RR', 281, 138),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _warningBanner(List<String> boards) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.error,
+      child: ListTile(
+        dense: true,
+        leading: Icon(Icons.warning_amber_rounded, color: scheme.onError),
+        title: Text(
+          'No confirmation from: ${boards.join(", ")}',
+          style: TextStyle(color: scheme.onError),
+        ),
+        subtitle: Text(
+          'Check the board(s), then send again',
+          style: TextStyle(color: scheme.onError.withValues(alpha: 0.8)),
+        ),
+        trailing: IconButton(
+          icon: Icon(Icons.close, color: scheme.onError),
+          onPressed:
+              () => ClassicManager.instance.unackedBoards.value = const {},
         ),
       ),
     );

@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#211f26">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Tire Pressure">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Tire Pressure Control</title>
+<style>
+/* ==== Material 3 dark theme, seeded teal (mirrors ThemeData in main.dart) */
+:root{
+  --surface:#141218;
+  --surface-container:#211f26;
+  --primary:#54dbc9;
+  --on-primary:#003733;
+  --on-surface:#e6e0e9;
+  --on-surface-variant:#cac4d0;
+  --outline:#938f99;
+  --outline-variant:#47494f;
+  --slider-inactive:#49454f;
+  --error:#ffb4ab;
+  --on-error:#5c1a15;
+  --inverse-surface:#e6e0e9;
+  --inverse-on-surface:#322f35;
+  --green-accent:#69f0ae;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{background:var(--surface);color:var(--on-surface);
+  font-family:Roboto,-apple-system,'Segoe UI',sans-serif;
+  display:flex;flex-direction:column;height:100dvh;overflow:hidden}
+
+/* ================= AppBar ================= */
+#appbar{position:relative;height:calc(env(safe-area-inset-top) + 56px);
+  background:var(--surface-container);display:flex;align-items:flex-end}
+#appbar .title{flex:1;text-align:center;font-size:20px;font-weight:400;padding-bottom:14px}
+.iconbtn{position:absolute;right:4px;bottom:4px;width:48px;height:48px;border:none;
+  background:transparent;color:var(--on-surface-variant);display:flex;
+  align-items:center;justify-content:center;cursor:pointer}
+.iconbtn svg{width:24px;height:24px;fill:currentColor}
+#linkIcon.searching svg{animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+
+/* ================= status strip ====================================== */
+#status{display:none;text-align:center;font-size:12px;color:var(--on-surface-variant);
+  padding:5px 8px;background:var(--surface-container)}
+#status.show{display:block}
+#status .chip{display:inline-flex;align-items:center;margin-left:6px;
+  border:1px solid var(--outline-variant);border-radius:12px;padding:1px 8px}
+#status .chip button{border:none;background:transparent;color:var(--on-surface-variant);
+  font-size:13px;margin-left:4px;cursor:pointer;padding:0 2px}
+
+/* ================= warning banner ==================================== */
+#banner{display:none;background:var(--error);color:var(--on-error);
+  padding:6px 8px;font-size:13px;line-height:1.35;align-items:center;gap:10px}
+#banner.show{display:flex}
+#banner .warn{width:22px;height:22px;flex:none;fill:var(--on-error)}
+#banner .txt{flex:1}
+#banner b{font-weight:500;display:block;color:var(--on-error)}
+#banner small{color:var(--on-error);opacity:.85}
+#banner .close{border:none;background:transparent;width:40px;height:40px;flex:none;
+  display:flex;align-items:center;justify-content:center;cursor:pointer}
+#banner .close svg{width:20px;height:20px;fill:var(--on-error)}
+
+/* ================= overview canvas =================================== */
+#canvasWrap{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden}
+#stage{position:relative;aspect-ratio:379/212;width:100%}
+
+.car{position:absolute;border:1.5px solid var(--primary);border-radius:12px}
+.mount{position:absolute;width:9px;height:18px;background:var(--primary);border-radius:3px}
+
+.setall{position:absolute;border:1.5px solid var(--primary);border-radius:10px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer}
+.setall:active{opacity:.65}
+#setallLbl{color:var(--primary);font-weight:600;letter-spacing:3px;line-height:1.25}
+#setallAvg{color:var(--on-surface-variant);line-height:1.3}
+
+.tile{position:absolute;cursor:pointer;display:flex;flex-direction:column;align-items:center}
+.tile:active{opacity:.55}
+.tilebox{position:relative;width:30px;aspect-ratio:1;border:1.5px solid var(--primary);
+  border-radius:6px;display:flex;align-items:center;justify-content:center}
+.tname{color:var(--primary);font-weight:700}
+.tdot{position:absolute;border-radius:50%;top:10%;right:10%}
+.tval{margin-top:4px;color:var(--on-surface-variant);text-align:center;white-space:nowrap}
+
+/* ================= edit screen (full-screen route) =================== */
+#edit{position:fixed;inset:0;background:var(--surface);display:none;flex-direction:column;z-index:20}
+#edit.open{display:flex}
+#editAppbar{height:calc(env(safe-area-inset-top) + 56px);
+  background:var(--surface-container);display:flex;align-items:flex-end;
+  padding-bottom:14px;gap:6px}
+#backBtn{width:44px;height:44px;border:none;background:transparent;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;margin-left:2px}
+#backBtn svg{width:24px;height:24px;fill:var(--on-surface)}
+#editTitle{font-size:20px;font-weight:400}
+#editBody{flex:1;display:flex;flex-direction:column;
+  padding:16px 24px calc(16px + env(safe-area-inset-bottom))}
+.spacer{flex:1}
+#bigVal{font-size:64px;font-weight:300;color:var(--primary);text-align:center;line-height:1}
+#barUnit{font-size:16px;color:var(--on-surface-variant);text-align:center;margin-top:2px}
+
+#slider{-webkit-appearance:none;appearance:none;width:100%;height:34px;background:transparent}
+#slider::-webkit-slider-runnable-track{height:4px;border-radius:2px;
+  background:linear-gradient(to right,var(--primary) var(--fill,43%),
+    var(--slider-inactive) var(--fill,43%))}
+#slider::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;
+  border-radius:50%;background:var(--primary);margin-top:-8px}
+#minmax{display:flex;justify-content:space-between;padding:0 8px;
+  color:var(--on-surface-variant);font-size:13px}
+
+.btnrow{display:flex;gap:16px}
+.mbtn{flex:1;height:48px;font-size:14px;font-weight:600;letter-spacing:.2px;border-radius:24px;cursor:pointer}
+#cancelBtn{background:transparent;border:1px solid var(--outline);color:var(--primary)}
+#okBtn{background:var(--primary);border:none;color:var(--on-primary)}
+
+/* ================= SnackBar ========================================== */
+#snack{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom));
+  z-index:40;background:var(--inverse-surface);color:var(--inverse-on-surface);
+  padding:14px 16px;border-radius:6px;font-size:14px;display:none;
+  box-shadow:0 3px 10px rgba(0,0,0,.4)}
+</style>
+</head>
+<body>
+
+<div id="appbar">
+  <div class="title">Tire Pressure</div>
+  <button class="iconbtn" id="linkIcon" aria-label="Link boards"></button>
+</div>
+<div id="status"></div>
+
+<div id="banner">
+  <svg class="warn" viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+  <div class="txt"><b id="bannerTitle"></b><small id="bannerSub"></small></div>
+  <button class="close" id="bannerClose">
+    <svg viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+  </button>
+</div>
+
+<div id="canvasWrap"><div id="stage">
+  <div class="car" id="car"></div>
+</div></div>
+
+<!-- ============ edit screen ============ -->
+<div id="edit">
+  <div id="editAppbar">
+    <button id="backBtn"><svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg></button>
+    <div id="editTitle">Tire FL</div>
+  </div>
+  <div id="editBody">
+    <div class="spacer"></div>
+    <div id="bigVal">2.3</div>
+    <div id="barUnit">bar</div>
+    <div class="spacer"></div>
+    <input type="range" id="slider" min="1" max="4" step="0.1" value="2.3">
+    <div id="minmax"><span>1.0</span><span>4.0</span></div>
+    <div class="spacer"></div>
+    <div class="btnrow">
+      <button class="mbtn" id="cancelBtn">Cancel</button>
+      <button class="mbtn" id="okBtn">OK</button>
+    </div>
+  </div>
+</div>
+
+<div id="snack"></div>
+
+<script>
+/* offline cache: after the first visit the app runs with zero internet */
+if('serviceWorker' in navigator&&location.protocol==='https:'){
+  addEventListener('load',()=>navigator.serviceWorker.register('./sw.js'));
+}
+</script>
+
+<script>
+'use strict';
+/* ===== BLE settings (match esp32/tire_pressure_esp32s3.ino) ============ */
+const SERVICE_UUID='5f1d16a0-046d-47fd-b49a-d6f1ae118f52';
+const CHAR_UUID  ='5f1d16a1-046d-47fd-b49a-d6f1ae118f52';
+const NAME_PREFIX='TireESP32';
+const ACK_TIMEOUT=1500;
+const RETRY_MS=5000;   /* mirrors classic_manager auto-reconnect cadence */
+/*=======================================================================*/
+const TIRES=['FL','FR','RL','RR'];
+const POS={FL:[68,42],FR:[281,42],RL:[68,138],RR:[281,138]};
+const ICONS={
+ connected:'<path d="M17.71 7.71 12 2h-1v7.59L6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 11 14.41V22h1l5.71-5.71-4.3-4.29 4.3-4.29zM13 5.83l1.88 1.88L13 9.59V5.83zm1.88 10.46L13 14.41v3.76l1.88-1.88zM17.73 9.54a3.2 3.2 0 0 1 0 4.92l1.41 1.41a5.2 5.2 0 0 0 0-7.74l-1.41 1.41z"/>',
+ searching:'<path d="M14.24 12.01l2.32 2.32c.28-.72.44-1.51.44-2.33 0-.82-.16-1.59-.43-2.31l-2.33 2.32zm5.29-5.3l-1.26-1.26c-.34 1.75-1.11 3.34-2.22 4.67l1.42 1.42c1.39-1.52 2.28-3.47 2.06-4.83zM17.71 3.7 12 0h-1v7.59L6.41 3 5 4.41 10.59 10 5 15.59 6.41 17 11 12.41V20h1l5.71-5.71-4.3-4.29 4.3-4.29zM13 3.83l1.88 1.88L13 7.59V3.83z"/>',
+ disabled:'<path d="M13 5.83l1.88 1.88-1.6 1.6 1.41 1.41 3.02-3.02L12 2h-1v5.03l2 2V5.83zM5.41 4 4 5.41 10.59 12 5 17.59 6.41 19 11 14.41V22h1l4.29-4.29 2.3 2.29L20 18.59 5.41 4zM12 14.41l-1.59 1.59L12 17.59v-3.18z"/>'};
+
+let pressures={FL:2.3,FR:2.3,RL:2.5,RR:2.5};
+/* tireId -> {dev, ch, retryTimer, retrying} */
+const boards=new Map();
+const pendingAcks=new Set();
+let target=null,editingAll=false,ackTimer=null;
+const $=id=>document.getElementById(id);
+
+/* ---------------- link icon + status chips ---------------------------- */
+function setPhase(p){
+  const ic=$('linkIcon');
+  ic.innerHTML='<svg viewBox="0 0 24 24">'+ICONS[p]+'</svg>';
+  ic.classList.toggle('searching',p==='searching');
+}
+function refreshChrome(){
+  const st=$('status');
+  const names=[...boards.keys()].sort();
+  if(boards.size===0){
+    setPhase('disabled');
+    st.innerHTML=navigator.bluetooth
+      ?'Not linked &middot; tap the bluetooth icon to add boards'
+      :'This browser has no Web Bluetooth - use Chrome on Android or the Bluefy app on iPhone';
+    st.classList.add('show');return;
+  }
+  setPhase(pendingRetries()>0?'searching':'connected');
+  st.innerHTML='Linked: '+names.map(id=>
+    '<span class="chip">'+id+
+    '<button data-drop="'+id+'" aria-label="unlink '+id+'">&#x2715;</button></span>').join('');
+  st.classList.add('show');
+  st.querySelectorAll('[data-drop]').forEach(b=>{
+    b.onclick=()=>dropBoard(b.dataset.drop,true);
+  });
+}
+function pendingRetries(){
+  let n=0;boards.forEach(b=>{if(b.retrying)n++;});return n;
+}
+
+/* ---------------- canvas geometry (main.dart parity) ------------------- */
+function buildStage(){
+  const st=$('stage'),s=st.clientWidth/379,px=v=>(v*s)+'px';
+  const car=$('car');car.innerHTML='';
+  car.style.left=px(114);car.style.top=px(6);
+  car.style.width=px(150);car.style.height=px(200);
+  [[5,5],[136,5],[5,177],[136,177]].forEach(([x,y])=>{
+    const m=document.createElement('div');m.className='mount';
+    m.style.left=px(x);m.style.top=px(y);car.appendChild(m);
+  });
+  st.querySelectorAll('.setall,.tile').forEach(e=>e.remove());
+  const sa=document.createElement('div');sa.className='setall';
+  sa.style.left=px(128);sa.style.top=px(74);
+  sa.style.width=px(122);sa.style.height=px(64);
+  sa.innerHTML='<span id="setallLbl">SET ALL</span><span id="setallAvg"></span>';
+  sa.onclick=()=>openEdit(null,true);
+  st.appendChild(sa);
+  TIRES.forEach(t=>{
+    const el=document.createElement('div');
+    el.className='tile';el.id='t'+t;
+    el.style.left=px(POS[t][0]);el.style.top=px(POS[t][1]);
+    el.innerHTML='<div class="tilebox"><span class="tname">'+t+
+      '</span><span class="tdot"></span></div><div class="tval"></div>';
+    el.querySelector('.tilebox').style.width=px(30);
+    el.onclick=()=>openEdit(t,false);
+    st.appendChild(el);
+  });
+  layoutText();refresh();
+}
+function layoutText(){
+  const s=$('stage').clientWidth/379;
+  const clamp=(lo,v,hi)=>Math.min(hi,Math.max(lo,v));
+  $('setallLbl').style.fontSize=clamp(14,14*s,24)+'px';
+  $('setallAvg').style.fontSize=clamp(10,10*s,14)+'px';
+  TIRES.forEach(t=>{
+    const el=$('t'+t);
+    el.querySelector('.tname').style.fontSize=clamp(12,13*s,22)+'px';
+    el.querySelector('.tval').style.fontSize=clamp(11,11*s,15)+'px';
+    const d=el.querySelector('.tdot'),w=clamp(5,5*s,10)+'px';
+    d.style.width=w;d.style.height=w;
+  });
+}
+let rsTimer=null;
+window.addEventListener('resize',()=>{
+  clearTimeout(rsTimer);rsTimer=setTimeout(buildStage,150);
+});
+
+function refresh(){
+  TIRES.forEach(t=>{
+    const el=$('t'+t),linked=boards.has(t);
+    el.querySelector('.tval').textContent=pressures[t].toFixed(1)+' bar';
+    el.querySelector('.tdot').style.background=
+      linked?'var(--green-accent)':'var(--outline-variant)';
+    el.style.opacity=linked?1:0.35;
+  });
+  $('setallAvg').textContent=
+    'avg '+(TIRES.reduce((s,t)=>s+pressures[t],0)/4).toFixed(1)+' bar';
+}
+
+/* ---------------- editor (guards mirror _editPressure) ----------------- */
+const sl=$('slider');
+function openEdit(t,isAll){
+  editingAll=isAll;target=t;
+  if(isAll){
+    const missing=[];
+    for(const x of TIRES)if(!boards.has(x))missing.push(x);
+    if(missing.length){snack('Not linked: '+missing.join(', ')+' - connect first');return;}
+    $('editTitle').textContent='All Tires';
+    sl.value=(TIRES.reduce((s,x)=>s+pressures[x],0)/4).toFixed(1);
+  }else{
+    if(!boards.has(t)){snack(t+' is not linked - connect or wait for auto-reconnect');return;}
+    $('editTitle').textContent='Tire '+t;
+    sl.value=pressures[t].toFixed(1);
+  }
+  updateFill();
+  $('bigVal').textContent=(+sl.value).toFixed(1);
+  $('edit').classList.add('open');
+}
+function updateFill(){sl.style.setProperty('--fill',((sl.value-1)/3*100)+'%');}
+sl.addEventListener('input',()=>{
+  $('bigVal').textContent=(+sl.value).toFixed(1);updateFill();
+});
+$('backBtn').onclick=$('cancelBtn').onclick=()=>{$('edit').classList.remove('open');};
+$('okBtn').onclick=()=>{
+  const v=+(+sl.value).toFixed(1);
+  $('edit').classList.remove('open');
+  if(editingAll){TIRES.forEach(t=>pressures[t]=v);}else if(target){pressures[target]=v;}
+  refresh();sendPressures();
+};
+
+/* ---------------- transport: Web Bluetooth (GATT) ---------------------- */
+const enc=new TextEncoder(),dec=new TextDecoder();
+
+function tireIdOf(dev){
+  /* "TireESP32-FL" -> "FL" */
+  return (dev.name||'').slice(NAME_PREFIX.length+1).trim().toUpperCase();
+}
+
+/* mirrors LinkManager.instance.connect(): opens the OS chooser, one board
+   per grant; tap the icon again to link the next board                 */
+async function linkNewBoard(){
+  if(!navigator.bluetooth){snack('No Web Bluetooth here - use Chrome (Android) or Bluefy (iPhone)');return;}
+  try{
+    const dev=await navigator.bluetooth.requestDevice({
+      filters:[{namePrefix:NAME_PREFIX}],
+      optionalServices:[SERVICE_UUID]});
+    await hookBoard(dev);
+  }catch(e){
+    if(e.name==='NotFoundError'){refreshChrome();}        /* user cancelled  */
+    else snack('Link failed: '+e.message);
+  }
+}
+
+async function hookBoard(dev){
+  const id=tireIdOf(dev);
+  if(!id){snack('Device "'+dev.name+'" has no TIRE_ID in its name');return;}
+  const old=boards.get(id);
+  if(old&&old.dev!==dev){try{old.dev.gatt.disconnect();}catch(e){}}
+  dev.addEventListener('gattserverdisconnected',()=>onDrop(id));
+  const server=await dev.gatt.connect();
+  const svc=await server.getPrimaryService(SERVICE_UUID);
+  const ch=await svc.getCharacteristic(CHAR_UUID);
+  await ch.startNotifications();
+  ch.addEventListener('characteristicvaluechanged',ev=>{
+    const msg=dec.decode(ev.target.value).trim();
+    if(msg==='ACK:'+id&&pendingAcks.has(id)){
+      pendingAcks.delete(id);
+      if(pendingAcks.size===0)$('banner').classList.remove('show');
+    }
+  });
+  boards.set(id,{dev,ch,retrying:false});
+  clearTimeoutRetry(old);
+  refreshChrome();refresh();
+}
+
+function clearTimeoutRetry(b){if(b)clearInterval(b.retryTimer);}
+
+function onDrop(id){
+  const b=boards.get(id);
+  if(!b)return;
+  boards.delete(id);
+  pendingAcks.delete(id);
+  scheduleRetry(b.dev,id);            /* mirrors classic_manager._retryTimers */
+  refreshChrome();refresh();
+}
+
+function scheduleRetry(dev,id){
+  const entry={dev,ch:null,retrying:true,retryTimer:null};
+  /* keep slot warm so phase icon shows searching while we hunt */
+  boards.set(id,Object.assign({},boards.get(id)||{},entry));
+  const tick=async()=>{
+    const cur=boards.get(id);
+    if(!cur||!cur.retrying)return;
+    try{
+      const server=await dev.gatt.connect();       /* allowed w/o gesture after first grant */
+      if(server.connected){clearInterval(cur.retryTimer);cur.retrying=false;
+        try{await hookBoard(dev);}catch(e){}       /* resubscribe notifications */
+        return;}
+    }catch(e){/* board still away */}
+  };
+  cur_retry(entry,tick);
+}
+function cur_retry(entry,tick){
+  entry.retryTimer=setInterval(tick,RETRY_MS);tick();
+}
+
+function dropBoard(id,forget){
+  const b=boards.get(id);
+  if(b){
+    clearInterval(b.retryTimer);
+    try{b.dev.gatt.disconnect();}catch(e){}
+    if(forget&&b.dev.forget)b.dev.forget();       /* so the chooser offers it fresh */
+  }
+  boards.delete(id);pendingAcks.delete(id);
+  refreshChrome();refresh();
+}
+
+/* mirrors _LinkButton.onPressed: nothing linked -> open chooser,
+   something linked -> unlink everything                                 */
+$('linkIcon').onclick=()=>{
+  if(boards.size>0){[...boards.keys()].forEach(id=>dropBoard(id,false));}
+  else linkNewBoard();
+};
+
+/* ---- silent re-hook of previously granted boards after reload -------- */
+async function autoReconnectKnown(){
+  if(!navigator.bluetooth||!navigator.bluetooth.getDevices)return;
+  try{
+    const known=await navigator.bluetooth.getDevices();
+    for(const dev of known){
+      if((dev.name||'').startsWith(NAME_PREFIX)){
+        try{await hookBoard(dev);}
+        catch(e){onDrop(tireIdOf(dev));}          /* starts the retry loop */
+      }
+    }
+  }catch(e){}
+}
+
+/* ---- send one CSV to every linked board (main.dart parity) ----------- */
+async function sendPressures(){
+  if(boards.size===0){
+    snack('Not linked - tap the bluetooth icon to connect');return;
+  }
+  const csv=TIRES.map(t=>pressures[t].toFixed(1)).join(',');
+  pendingAcks.clear();
+  for(const [id,b] of boards){
+    try{
+      await b.ch.writeValue(enc.encode(csv));
+      pendingAcks.add(id);
+    }catch(e){
+      snack(id+' write failed: '+e.message);
+    }
+  }
+  if(pendingAcks.size===0)return;
+  clearTimeout(ackTimer);
+  ackTimer=setTimeout(()=>{
+    if(pendingAcks.size){
+      showBanner('No confirmation from: '+[...pendingAcks].sort().join(', '),
+        'Check the board(s), then send again');
+    }
+  },ACK_TIMEOUT);
+}
+function showBanner(title,sub){
+  $('bannerTitle').textContent=title;$('bannerSub').textContent=sub;
+  $('banner').classList.add('show');
+}
+$('bannerClose').onclick=()=>$('banner').classList.remove('show');
+
+function snack(msg){
+  const el=$('snack');el.textContent=msg;el.style.display='block';
+  clearTimeout(snackTimer);snackTimer=setTimeout(()=>el.style.display='none',3000);
+}
+
+/* ---------------- boot -------------------------------------------------- */
+buildStage();refreshChrome();
+autoReconnectKnown();
+</script>
+</body>
+</html>

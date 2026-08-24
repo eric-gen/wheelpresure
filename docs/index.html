@@ -208,18 +208,32 @@ function setPhase(p){
   ic.innerHTML='<svg viewBox="0 0 24 24">'+ICONS[p]+'</svg>';
   ic.classList.toggle('searching',p==='searching');
 }
+let warnedNoMemory=false;
+function warnNoMemory(){
+  if(warnedNoMemory||!rememberedTires().length)return;
+  warnedNoMemory=true;
+  snack('This browser forgets boards on close - use current Google Chrome (114+) for auto-reconnect');
+}
 function refreshChrome(){
   const st=$('status');
   const names=[...boards.keys()].sort();
   if(boards.size===0){
     setPhase('disabled');
     const rem=rememberedTires();
+    /* tappable relink shortcuts for every board we remember */
+    const ghosts=rem.map(id=>
+      '<button class="chip" data-rel="'+id+
+      '" style="border-style:dashed;color:var(--on-surface)">'+id+' &#x21bb;</button>').join('');
     st.innerHTML=navigator.bluetooth
-      ?('Not linked'+
-        (rem.length?' &middot; remembered: '+rem.join(', '):'')+
-        ' &middot; tap the bluetooth icon to add boards')
+      ?('Not linked &middot; '+(rem.length?('relink: '+ghosts+' &middot; '):'')+
+        'or tap the bluetooth icon')
       :'This browser has no Web Bluetooth - use Chrome on Android or the Bluefy app on iPhone';
-    st.classList.add('show');return;
+    st.classList.add('show');
+    if(navigator.bluetooth){
+      if(!navigator.bluetooth.getDevices)warnNoMemory();
+      st.querySelectorAll('[data-rel]').forEach(b=>{b.onclick=linkNewBoard;});
+    }
+    return;
   }
   setPhase(pendingRetries()>0?'searching':'connected');
   /* explicit add-button: linking board 2..n never means unlinking board 1 */
@@ -436,8 +450,7 @@ async function reconnectRemembered(verbose){
       known=await navigator.bluetooth.getDevices();
   }catch(e){}
   if(known===null){
-    if(verbose&&rememberedTires().length)
-      snack('This browser forgets boards when the app closes - link them again');
+    if(verbose)warnNoMemory();
     return;
   }
   const mine=known.filter(d=>(d.name||'').startsWith(NAME_PREFIX));

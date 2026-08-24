@@ -195,6 +195,7 @@ const ICONS={
  disabled:'<path d="M13 5.83l1.88 1.88-1.6 1.6 1.41 1.41 3.02-3.02L12 2h-1v5.03l2 2V5.83zM5.41 4 4 5.41 10.59 12 5 17.59 6.41 19 11 14.41V22h1l4.29-4.29 2.3 2.29L20 18.59 5.41 4zM12 14.41l-1.59 1.59L12 17.59v-3.18z"/>'};
 
 let pressures={FL:2.3,FR:2.3,RL:2.5,RR:2.5};
+try{Object.assign(pressures,JSON.parse(localStorage.getItem('tp_pressures')||'{}'));}catch(e){}
 /* tireId -> {dev, ch, retryTimer, retrying} */
 const boards=new Map();
 const manualDrops=new WeakSet();   /* devices the user unlinked on purpose */
@@ -212,8 +213,11 @@ function refreshChrome(){
   const names=[...boards.keys()].sort();
   if(boards.size===0){
     setPhase('disabled');
+    const rem=rememberedTires();
     st.innerHTML=navigator.bluetooth
-      ?'Not linked &middot; tap the bluetooth icon to add boards'
+      ?('Not linked'+
+        (rem.length?' &middot; remembered: '+rem.join(', '):'')+
+        ' &middot; tap the bluetooth icon to add boards')
       :'This browser has no Web Bluetooth - use Chrome on Android or the Bluefy app on iPhone';
     st.classList.add('show');return;
   }
@@ -290,6 +294,7 @@ function refresh(){
   });
   $('setallAvg').textContent=
     'avg '+(TIRES.reduce((s,t)=>s+pressures[t],0)/4).toFixed(1)+' bar';
+  try{localStorage.setItem('tp_pressures',JSON.stringify(pressures));}catch(e){}
 }
 
 /* ---------------- editor (guards mirror _editPressure) ----------------- */
@@ -360,6 +365,7 @@ async function hookBoard(dev){
     stage='find characteristic';
     const ch=await svc.getCharacteristic(CHAR_UUID);
     boards.set(id,{dev,ch,retrying:false});
+    rememberTire(id);
     clearTimeoutRetry(old);
     refreshChrome();refresh();
   }catch(e){
@@ -419,18 +425,44 @@ function dropBoard(id,forget){
    via the x on each chip in the status strip */
 $('linkIcon').onclick=()=>linkNewBoard();
 
-/* ---- silent re-hook of previously granted boards after reload -------- */
+/* ---- silent re-hook of previously granted boards after reload --------
+   needs navigator.bluetooth.getDevices() (Chrome 114+); on older
+   browsers the OS forgets the grant when the app closes and the user
+   must re-link via the chooser - we say so instead of failing quietly. */
 async function autoReconnectKnown(){
-  if(!navigator.bluetooth||!navigator.bluetooth.getDevices)return;
+  if(!navigator.bluetooth)return;
+  let known=null;
   try{
-    const known=await navigator.bluetooth.getDevices();
-    for(const dev of known){
-      if((dev.name||'').startsWith(NAME_PREFIX)){
-        try{await hookBoard(dev);}
-        catch(e){onDrop(tireIdOf(dev));}          /* starts the retry loop */
-      }
-    }
+    if(navigator.bluetooth.getDevices)
+      known=await navigator.bluetooth.getDevices();
   }catch(e){}
+  if(known===null){
+    if(rememberedTires().length)
+      snack('This browser forgets boards when the app closes - link them again');
+    return;
+  }
+  const mine=known.filter(d=>(d.name||'').startsWith(NAME_PREFIX));
+  if(mine.length===0){
+    if(rememberedTires().length)
+      snack('Boards not remembered - tap the bluetooth icon to link them');
+    return;
+  }
+  let hooked=0;
+  for(const dev of mine){
+    try{await hookBoard(dev);hooked++;}
+    catch(e){onDrop(tireIdOf(dev));}          /* starts the retry loop */
+  }
+  if(hooked===0&&rememberedTires().length)
+    snack('Boards are away - they reconnect automatically when back in range');
+}
+
+/* ---- tiny persistence layer (survives reloads/closes) ---------------- */
+function rememberedTires(){
+  try{return JSON.parse(localStorage.getItem('tp_tires')||'[]');}catch(e){return[];}
+}
+function rememberTire(id){
+  const s=new Set(rememberedTires());s.add(id);
+  try{localStorage.setItem('tp_tires',JSON.stringify([...s]));}catch(e){}
 }
 
 /* ---- send one CSV to every linked board (main.dart parity) -----------

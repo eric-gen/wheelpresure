@@ -186,6 +186,7 @@ const CHAR_UUID  ='5f1d16a1-046d-47fd-b49a-d6f1ae118f52';
 const NAME_PREFIX='TireESP32';
 const ACK_TIMEOUT=1500;
 const RETRY_MS=5000;   /* mirrors classic_manager auto-reconnect cadence */
+const APP_VERSION='v13'; /* shown in the status strip - must match sw.js */
 /*=======================================================================*/
 const TIRES=['FL','FR','RL','RR'];
 const POS={FL:[68,42],FR:[281,42],RL:[68,138],RR:[281,138]};
@@ -229,6 +230,7 @@ function refreshChrome(){
       ?('Not linked &middot; '+(rem.length?('relink: '+ghosts+' &middot; '):'')+
         'or tap the bluetooth icon')
       :'This browser has no Web Bluetooth - use Chrome on Android or the Bluefy app on iPhone';
+    st.innerHTML+=' &middot; '+APP_VERSION;
     st.classList.add('show');
     if(navigator.bluetooth){
       if(!navigator.bluetooth.getDevices)warnNoMemory();
@@ -241,7 +243,7 @@ function refreshChrome(){
   st.innerHTML='Linked: '+names.map(id=>
     '<span class="chip">'+id+
     '<button data-drop="'+id+'" aria-label="unlink '+id+'">&#x2715;</button></span>').join('')+
-    '<button id="addBtn" class="addchip">+ add</button>';
+    '<button id="addBtn" class="addchip">+ add</button>'+' &middot; '+APP_VERSION;
   st.classList.add('show');
   st.querySelectorAll('[data-drop]').forEach(b=>{
     b.onclick=()=>dropBoard(b.dataset.drop,true);

@@ -18,6 +18,7 @@
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
+#include <ESP_ARDUINO_VERSION.h>
 
 #define TIRE_ID "FL"
 
@@ -72,6 +73,7 @@ class TireWriteCallback : public BLECharacteristicCallbacks {
     // Tell the app this board applied its slot.
     pCharacteristic->setValue(String("ACK:") + TIRE_ID);
     pCharacteristic->notify();
+    Serial.printf("[BLE] %s ACK sent\n", TIRE_ID);
   }
 };
 
@@ -92,8 +94,14 @@ void setup() {
   BLECharacteristic *characteristic = service->createCharacteristic(
       CHAR_UUID,
       BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+  // Core 3.x creates and manages the CCCD itself for NOTIFY characteristics.
+  // Manually adding BLE2902 on 3.x breaks notifications (known issue), so
+  // only add it explicitly on core 2.x.
+#else
   // Required so iOS/Android can subscribe to the ACK notifications.
   characteristic->addDescriptor(new BLE2902());
+#endif
   characteristic->setCallbacks(new TireWriteCallback());
 
   service->start();

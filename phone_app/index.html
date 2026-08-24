@@ -352,8 +352,11 @@ async function hookBoard(dev){
   await ch.startNotifications();
   ch.addEventListener('characteristicvaluechanged',ev=>{
     const msg=dec.decode(ev.target.value).trim();
-    if(msg==='ACK:'+id&&pendingAcks.has(id)){
-      pendingAcks.delete(id);
+    /* loose match: "ACK:FL", "ACK: FL\n" etc. */
+    const m=msg.match(/^ACK[:\s]*([A-Za-z]{2})/);
+    const who=m?m[1].toUpperCase():null;
+    if(who&&pendingAcks.has(who)){
+      pendingAcks.delete(who);
       if(pendingAcks.size===0)$('banner').classList.remove('show');
     }
   });
@@ -434,9 +437,11 @@ async function sendPressures(){
   pendingAcks.clear();
   for(const [id,b] of boards){
     try{
-      await b.ch.writeValue(enc.encode(csv));
+      /* arm BEFORE writing: the board can ack within ms of the write */
       pendingAcks.add(id);
+      await b.ch.writeValue(enc.encode(csv));
     }catch(e){
+      pendingAcks.delete(id);
       snack(id+' write failed: '+e.message);
     }
   }

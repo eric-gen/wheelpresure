@@ -212,7 +212,8 @@ let warnedNoMemory=false;
 function warnNoMemory(){
   if(warnedNoMemory||!rememberedTires().length)return;
   warnedNoMemory=true;
-  snack('This browser forgets boards on close - use current Google Chrome (114+) for auto-reconnect');
+  snack('Chrome hides auto-reconnect: enable "Experimental Web Platform Features"'+
+    ' in chrome://flags, then link each board once');
 }
 function refreshChrome(){
   const st=$('status');

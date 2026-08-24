@@ -125,7 +125,7 @@ body{background:var(--surface);color:var(--on-surface);
 #snack{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom));
   z-index:40;background:var(--inverse-surface);color:var(--inverse-on-surface);
   padding:14px 16px;border-radius:6px;font-size:14px;display:none;
-  box-shadow:0 3px 10px rgba(0,0,0,.4)}
+  box-shadow:0 3px 10px rgba(0,0,0,.4);cursor:pointer}
 </style>
 </head>
 <body>
@@ -172,9 +172,17 @@ body{background:var(--surface);color:var(--on-surface);
 <div id="snack"></div>
 
 <script>
-/* offline cache: after the first visit the app runs with zero internet */
+/* offline cache + self-update: when a new version is installed it takes
+   over and the page reloads itself once, so users always end up on the
+   latest code without manual refresh gymnastics */
 if('serviceWorker' in navigator&&location.protocol==='https:'){
-  addEventListener('load',()=>navigator.serviceWorker.register('./sw.js'));
+  addEventListener('load',()=>{
+    let refreshing=false;
+    navigator.serviceWorker.addEventListener('controllerchange',()=>{
+      if(refreshing)return;refreshing=true;location.reload();
+    });
+    navigator.serviceWorker.register('./sw.js');
+  });
 }
 </script>
 
@@ -186,7 +194,7 @@ const CHAR_UUID  ='5f1d16a1-046d-47fd-b49a-d6f1ae118f52';
 const NAME_PREFIX='TireESP32';
 const ACK_TIMEOUT=1500;
 const RETRY_MS=5000;   /* mirrors classic_manager auto-reconnect cadence */
-const APP_VERSION='v13'; /* shown in the status strip - must match sw.js */
+const APP_VERSION='v14'; /* shown in the status strip - must match sw.js */
 /*=======================================================================*/
 const TIRES=['FL','FR','RL','RR'];
 const POS={FL:[68,42],FR:[281,42],RL:[68,138],RR:[281,138]};
@@ -544,6 +552,7 @@ $('bannerClose').onclick=()=>$('banner').classList.remove('show');
 
 function snack(msg){
   const el=$('snack');el.textContent=msg;el.style.display='block';
+  el.onclick=()=>{clearTimeout(snackTimer);el.style.display='none';};
   clearTimeout(snackTimer);snackTimer=setTimeout(()=>el.style.display='none',5000);
 }
 

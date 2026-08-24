@@ -429,32 +429,41 @@ $('linkIcon').onclick=()=>linkNewBoard();
    needs navigator.bluetooth.getDevices() (Chrome 114+); on older
    browsers the OS forgets the grant when the app closes and the user
    must re-link via the chooser - we say so instead of failing quietly. */
-async function autoReconnectKnown(){
-  if(!navigator.bluetooth)return;
+async function reconnectRemembered(verbose){
   let known=null;
   try{
     if(navigator.bluetooth.getDevices)
       known=await navigator.bluetooth.getDevices();
   }catch(e){}
   if(known===null){
-    if(rememberedTires().length)
+    if(verbose&&rememberedTires().length)
       snack('This browser forgets boards when the app closes - link them again');
     return;
   }
   const mine=known.filter(d=>(d.name||'').startsWith(NAME_PREFIX));
-  if(mine.length===0){
-    if(rememberedTires().length)
-      snack('Boards not remembered - tap the bluetooth icon to link them');
-    return;
-  }
   let hooked=0;
   for(const dev of mine){
+    /* never double-link a device we already hold */
+    if([...boards.values()].some(b=>b.dev===dev))continue;
     try{await hookBoard(dev);hooked++;}
     catch(e){onDrop(tireIdOf(dev));}          /* starts the retry loop */
   }
-  if(hooked===0&&rememberedTires().length)
-    snack('Boards are away - they reconnect automatically when back in range');
+  if(hooked===0&&verbose&&rememberedTires().length){
+    snack(mine.length
+      ?'Boards are away - reconnecting automatically...'
+      :'Boards not remembered - tap the bluetooth icon to link them');
+  }
 }
+function autoReconnectKnown(){reconnectRemembered(true);}
+/* keep hunting: every 10 s, re-hook remembered boards that are still
+   missing (e.g. a board that was still booting when the app opened)   */
+setInterval(()=>{
+  if(!navigator.bluetooth||!navigator.bluetooth.getDevices)return;
+  if(pendingRetries()>0)return;
+  const rem=rememberedTires();
+  if(rem.length===0||boards.size>=rem.length)return;
+  reconnectRemembered(false);
+},10000);
 
 /* ---- tiny persistence layer (survives reloads/closes) ---------------- */
 function rememberedTires(){

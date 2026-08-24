@@ -14,11 +14,9 @@
 //   3. The BLE library used here ships with the esp32 board package
 //   4. Flash, then open Serial Monitor at 115200 baud
 
-#include <BLE2902.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
-#include <ESP_ARDUINO_VERSION.h>
 
 #define TIRE_ID "FL"
 
@@ -70,10 +68,13 @@ class TireWriteCallback : public BLECharacteristicCallbacks {
     }
     const float bar = parts[myIndex].toFloat();
     Serial.printf("[BLE] %s pressure received: %.1f bar\n", TIRE_ID, bar);
-    // Tell the app this board applied its slot.
-    pCharacteristic->setValue(String("ACK:") + TIRE_ID);
-    pCharacteristic->notify();
-    Serial.printf("[BLE] %s ACK sent\n", TIRE_ID);
+    // The app polls this characteristic after writing; the value carries
+    // the tire id AND the applied pressure so a stale ack can never be
+    // mistaken for a fresh one.
+    char ack[24];
+    snprintf(ack, sizeof(ack), "ACK:%s:%.1f", TIRE_ID, (double)bar);
+    pCharacteristic->setValue(String(ack));
+    Serial.printf("[BLE] %s ACK ready: %s\n", TIRE_ID, ack);
   }
 };
 
@@ -93,15 +94,7 @@ void setup() {
 
   BLECharacteristic *characteristic = service->createCharacteristic(
       CHAR_UUID,
-      BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
-#if ESP_ARDUINO_VERSION_MAJOR >= 3
-  // Core 3.x creates and manages the CCCD itself for NOTIFY characteristics.
-  // Manually adding BLE2902 on 3.x breaks notifications (known issue), so
-  // only add it explicitly on core 2.x.
-#else
-  // Required so iOS/Android can subscribe to the ACK notifications.
-  characteristic->addDescriptor(new BLE2902());
-#endif
+      BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
   characteristic->setCallbacks(new TireWriteCallback());
 
   service->start();

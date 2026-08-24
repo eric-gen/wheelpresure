@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -194,8 +194,7 @@ const ICONS={
 let pressures={FL:2.3,FR:2.3,RL:2.5,RR:2.5};
 /* tireId -> {dev, ch, retryTimer, retrying} */
 const boards=new Map();
-const pendingAcks=new Set();
-let target=null,editingAll=false,ackTimer=null;
+let target=null,editingAll=false=null;
 const $=id=>document.getElementById(id);
 
 /* ---------------- link icon + status chips ---------------------------- */
@@ -353,18 +352,6 @@ async function hookBoard(dev){
     const svc=await server.getPrimaryService(SERVICE_UUID);
     stage='find characteristic';
     const ch=await svc.getCharacteristic(CHAR_UUID);
-    stage='subscribe';
-    await ch.startNotifications();
-    ch.addEventListener('characteristicvaluechanged',ev=>{
-      const msg=dec.decode(ev.target.value).trim();
-      /* loose match: "ACK:FL", "ACK: FL\n" etc. */
-      const m=msg.match(/^ACK[:\s]*([A-Za-z]{2})/);
-      const who=m?m[1].toUpperCase():null;
-      if(who&&pendingAcks.has(who)){
-        pendingAcks.delete(who);
-        if(pendingAcks.size===0)$('banner').classList.remove('show');
-      }
-    });
     boards.set(id,{dev,ch,retrying:false});
     clearTimeoutRetry(old);
     refreshChrome();refresh();
@@ -380,7 +367,6 @@ function onDrop(id){
   const b=boards.get(id);
   if(!b)return;
   boards.delete(id);
-  pendingAcks.delete(id);
   scheduleRetry(b.dev,id);            /* mirrors classic_manager._retryTimers */
   refreshChrome();refresh();
 }
@@ -412,7 +398,7 @@ function dropBoard(id,forget){
     try{b.dev.gatt.disconnect();}catch(e){}
     if(forget&&b.dev.forget)b.dev.forget();       /* so the chooser offers it fresh */
   }
-  boards.delete(id);pendingAcks.delete(id);
+  boards.delete(id);
   refreshChrome();refresh();
 }
 
@@ -437,31 +423,43 @@ async function autoReconnectKnown(){
   }catch(e){}
 }
 
-/* ---- send one CSV to every linked board (main.dart parity) ----------- */
+/* ---- send one CSV to every linked board (main.dart parity) -----------
+   ACK = the board rewrites the characteristic value to "ACK:<id>:<bar>";
+   we poll-read it instead of using notifications, which sidesteps all
+   CCCD/descriptor quirks across esp32 cores and browsers.              */
 async function sendPressures(){
   if(boards.size===0){
     snack('Not linked - tap the bluetooth icon to connect');return;
   }
+  $('banner').classList.remove('show');
+  const failed=new Set();
   const csv=TIRES.map(t=>pressures[t].toFixed(1)).join(',');
-  pendingAcks.clear();
+  const jobs=[];
   for(const [id,b] of boards){
-    try{
-      /* arm BEFORE writing: the board can ack within ms of the write */
-      pendingAcks.add(id);
-      await b.ch.writeValue(enc.encode(csv));
-    }catch(e){
-      pendingAcks.delete(id);
-      snack(id+' write failed: '+e.message);
-    }
+    const want=pressures[id].toFixed(1);
+    jobs.push((async()=>{
+      try{
+        await b.ch.writeValue(enc.encode(csv));
+      }catch(e){
+        failed.add(id);snack(id+' write failed: '+e.message);return;
+      }
+      for(let i=0;i<6;i++){                 /* ~1.5 s total, like the APK */
+        await new Promise(r=>setTimeout(r,250));
+        try{
+          const parts=dec.decode(await b.ch.readValue()).trim().split(':');
+          if(parts.length>=3&&parts[0]==='ACK'&&
+             parts[1].toUpperCase()===id&&
+             Math.abs(parseFloat(parts[2])-parseFloat(want))<0.05)return;
+        }catch(e){/* transient read error - keep polling */}
+      }
+      failed.add(id);
+    })());
   }
-  if(pendingAcks.size===0)return;
-  clearTimeout(ackTimer);
-  ackTimer=setTimeout(()=>{
-    if(pendingAcks.size){
-      showBanner('No confirmation from: '+[...pendingAcks].sort().join(', '),
-        'Check the board(s), then send again');
-    }
-  },ACK_TIMEOUT);
+  await Promise.all(jobs);
+  if(failed.size){
+    showBanner('No confirmation from: '+[...failed].sort().join(', '),
+      'Check the board(s), then send again');
+  }
 }
 function showBanner(title,sub){
   $('bannerTitle').textContent=title;$('bannerSub').textContent=sub;

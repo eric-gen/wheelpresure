@@ -336,7 +336,7 @@ async function linkNewBoard(){
     await hookBoard(dev);
   }catch(e){
     if(e.name==='NotFoundError'){refreshChrome();}        /* user cancelled  */
-    else snack('Link failed: '+e.message);
+    else snack('Link failed ('+e.message+') - toggle phone Bluetooth off/on and retry');
   }
 }
 
@@ -346,23 +346,32 @@ async function hookBoard(dev){
   const old=boards.get(id);
   if(old&&old.dev!==dev){try{old.dev.gatt.disconnect();}catch(e){}}
   dev.addEventListener('gattserverdisconnected',()=>onDrop(id));
-  const server=await dev.gatt.connect();
-  const svc=await server.getPrimaryService(SERVICE_UUID);
-  const ch=await svc.getCharacteristic(CHAR_UUID);
-  await ch.startNotifications();
-  ch.addEventListener('characteristicvaluechanged',ev=>{
-    const msg=dec.decode(ev.target.value).trim();
-    /* loose match: "ACK:FL", "ACK: FL\n" etc. */
-    const m=msg.match(/^ACK[:\s]*([A-Za-z]{2})/);
-    const who=m?m[1].toUpperCase():null;
-    if(who&&pendingAcks.has(who)){
-      pendingAcks.delete(who);
-      if(pendingAcks.size===0)$('banner').classList.remove('show');
-    }
-  });
-  boards.set(id,{dev,ch,retrying:false});
-  clearTimeoutRetry(old);
-  refreshChrome();refresh();
+  let stage='connect';
+  try{
+    const server=await dev.gatt.connect();
+    stage='find service';
+    const svc=await server.getPrimaryService(SERVICE_UUID);
+    stage='find characteristic';
+    const ch=await svc.getCharacteristic(CHAR_UUID);
+    stage='subscribe';
+    await ch.startNotifications();
+    ch.addEventListener('characteristicvaluechanged',ev=>{
+      const msg=dec.decode(ev.target.value).trim();
+      /* loose match: "ACK:FL", "ACK: FL\n" etc. */
+      const m=msg.match(/^ACK[:\s]*([A-Za-z]{2})/);
+      const who=m?m[1].toUpperCase():null;
+      if(who&&pendingAcks.has(who)){
+        pendingAcks.delete(who);
+        if(pendingAcks.size===0)$('banner').classList.remove('show');
+      }
+    });
+    boards.set(id,{dev,ch,retrying:false});
+    clearTimeoutRetry(old);
+    refreshChrome();refresh();
+  }catch(e){
+    /* surface the failing GATT step so problems are diagnosable */
+    throw new Error(stage+' - '+e.message);
+  }
 }
 
 function clearTimeoutRetry(b){if(b)clearInterval(b.retryTimer);}

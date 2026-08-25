@@ -25,6 +25,8 @@ class ClassicManager implements LinkManager {
   /// warning banner in the UI.
 @override
   final unackedBoards = ValueNotifier<Set<String>>(const <String>{});
+  @override
+  final measured = ValueNotifier<Map<String, double>>(const {});
 
   static const ackTimeout = Duration(milliseconds: 1500);
 

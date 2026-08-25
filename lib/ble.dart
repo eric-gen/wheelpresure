@@ -22,18 +22,26 @@ class BleManager implements LinkManager {
   /// their advertised name: TireESP32-FL, TireESP32-FR, TireESP32-RL, ...
   static final charUuid = Guid('5f1d16a1-046d-47fd-b49a-d6f1ae118f52');
 
+  /// Optional live-measurement characteristic (new ESP-IDF firmware).
+  /// Boards without it simply don't report measured values.
+  static final pressureCharUuid = Guid('5f1d16a2-046d-47fd-b49a-d6f1ae118f52');
+
   @override
   final state = ValueNotifier<LinkState>(const LinkState());
   @override
   final message = ValueNotifier<String?>(null);
   @override
   final unackedBoards = ValueNotifier<Set<String>>(const <String>{});
+  @override
+  final measured = ValueNotifier<Map<String, double>>(const {});
 
   static const retryDelay = Duration(seconds: 5);
 
   final Map<String, BluetoothDevice> _devices = {};
   final Map<String, BluetoothCharacteristic> _chars = {};
+  final Map<String, BluetoothCharacteristic> _pressureChars = {};
   final Map<String, StreamSubscription<BluetoothConnectionState>> _subs = {};
+  final Map<String, StreamSubscription<List<int>>> _notifySubs = {};
   final Map<String, Timer> _retryTimers = {};
   bool _userDisconnected = false;
 
@@ -80,57 +88,14 @@ class BleManager implements LinkManager {
 
       _setPhase(LinkPhase.scanning);
       debugPrint('BLE scanning for TireESP32 boards (8s)...');
-      final found = <String, BluetoothDevice>{};
-      var devicesSeen = 0;
-      late final StreamSubscription<List<ScanResult>> scanSub;
-      scanSub = FlutterBluePlus.scanResults.listen((results) {
-        devicesSeen =
-            devicesSeen > results.length ? devicesSeen : results.length;
-        for (final r in results) {
-          final name =
-              r.advertisementData.advName.isNotEmpty
-                  ? r.advertisementData.advName
-                  : r.device.platformName;
-          final key = _keyFromName(name);
-          if (key != null && !found.containsKey(key)) {
-            debugPrint('BLE board found: "$name"');
-            found[key] = r.device;
-          }
-        }
-      });
-
-      // --- SAMSUNG WARM-UP CYCLE ---
-      await FlutterBluePlus.startScan();          // no timeout param!
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      await FlutterBluePlus.stopScan();
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-
-      // Main scan: unfiltered, we match by name ourselves. Manual timer +
-      // waiting on isScanning instead of the timeout parameter, which some
-      // Samsung stacks abort immediately.
-      debugPrint('BLE: starting main scan');
-      await FlutterBluePlus.startScan();
-      await FlutterBluePlus.isScanning.where((s) => s).first;
-      Timer(const Duration(seconds: 8), () {
-        FlutterBluePlus.stopScan();
-      });
-      await FlutterBluePlus.isScanning.where((s) => !s).first;
-      debugPrint('BLE: main scan finished');
-
-      await scanSub.cancel();
-      await FlutterBluePlus.stopScan();
-      debugPrint(
-        'BLE scan done: saw $devicesSeen device(s), boards: '
-        '${found.keys.toList()}',
-      );
+      final found = await scanBoards(seconds: 8);
+      debugPrint('BLE scan done: boards: ${found.keys.toList()}');
 
       if (found.isEmpty) {
         _setPhase(LinkPhase.disconnected);
         message.value =
-            devicesSeen == 0
-                ? 'Scan saw no devices at all - check Bluetooth & Location settings'
-                : 'Scan saw $devicesSeen device(s), but no TireESP32-xx - '
-                    'check the boards are powered and flashed';
+            'No TireESP32-xx found - check the boards are powered and '
+            'flashed, and that Bluetooth & Location are on';
         return;
       }
 
@@ -152,6 +117,107 @@ class BleManager implements LinkManager {
       message.value = 'Connection failed';
     }
   }
+
+  /// Scans for TireESP32 boards. Public so the devices screen can use it.
+  /// Throws on permission/adapter problems (caller shows the message).
+  Future<Map<String, BluetoothDevice>> scanBoards({int seconds = 8}) async {
+    final perms = await [
+      Permission.bluetoothScan,
+      Permission.bluetoothConnect,
+      Permission.location,
+    ].request();
+    debugPrint('BLE permissions: $perms');
+    final denied =
+        perms.entries.where((e) => !e.value.isGranted).map((e) => e.key);
+    if (denied.isNotEmpty) {
+      throw Exception(
+          'Permission denied (${denied.join(", ")}) - allow "Nearby devices" '
+          'and "Location" in Settings');
+    }
+
+    // Never hang here waiting for adapter events.
+    final adapter = await FlutterBluePlus.adapterState
+        .where((s) => s != BluetoothAdapterState.unknown)
+        .first
+        .timeout(
+          const Duration(seconds: 3),
+          onTimeout: () => FlutterBluePlus.adapterStateNow,
+        );
+    debugPrint('BLE adapter state: $adapter');
+    if (adapter != BluetoothAdapterState.on) {
+      throw Exception('Bluetooth is turned off');
+    }
+
+    final found = <String, BluetoothDevice>{};
+    late final StreamSubscription<List<ScanResult>> scanSub;
+    scanSub = FlutterBluePlus.scanResults.listen((results) {
+      for (final r in results) {
+        final name = r.advertisementData.advName.isNotEmpty
+            ? r.advertisementData.advName
+            : r.device.platformName;
+        final key = _keyFromName(name);
+        if (key != null && !found.containsKey(key)) {
+          debugPrint('BLE board found: "$name"');
+          found[key] = r.device;
+        }
+      }
+    });
+
+    // --- SAMSUNG WARM-UP CYCLE ---
+    await FlutterBluePlus.startScan(); // no timeout param!
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await FlutterBluePlus.stopScan();
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+
+    // Main scan: unfiltered, name-matched here. Manual lifecycle because
+    // some Samsung stacks abort FBP's own timeout parameter instantly.
+    await FlutterBluePlus.startScan();
+    await FlutterBluePlus.isScanning.where((s) => s).first;
+    Timer(Duration(seconds: seconds), () => FlutterBluePlus.stopScan());
+    await FlutterBluePlus.isScanning.where((s) => !s).first;
+
+    await scanSub.cancel();
+    await FlutterBluePlus.stopScan();
+
+    for (final e in found.entries) {
+      _discovered[e.key] = e.value; // remember for manual reconnects
+    }
+    return found;
+  }
+
+  final Map<String, BluetoothDevice> _discovered = {};
+
+  /// Devices seen by the most recent scans, for the devices screen.
+  Map<String, BluetoothDevice> get discovered => Map.of(_discovered);
+
+  /// Manually connect one specific board (devices screen).
+  Future<void> connectDevice(String key) async {
+    if (_chars.containsKey(key)) return;
+    var device = _devices[key] ?? _discovered[key];
+    device ??= await _findBoard(key);
+    if (device == null) {
+      message.value = '$key not found - is the board powered?';
+      return;
+    }
+    _devices[key] = device;
+    _discovered[key] = device;
+    await _link(key, device);
+  }
+
+  /// Manually disconnect one specific board without auto-reconnecting it.
+  Future<void> disconnectDevice(String key) async {
+    final b = _devices[key];
+    if (b == null) return;
+    _retryTimers.remove(key)?.cancel();
+    _suppressRetry.add(key);
+    try {
+      await b.disconnect();
+    } catch (_) {}
+    _remove(key);
+    _suppressRetry.remove(key);
+  }
+
+  final Set<String> _suppressRetry = {};
 
   Future<void> _link(String key, BluetoothDevice device) async {
     try {
@@ -175,14 +241,16 @@ class BleManager implements LinkManager {
 
       debugPrint('BLE: Connected to $key. Discovering services...');
       final services = await device.discoverServices();
-      
+
       BluetoothCharacteristic? target;
+      BluetoothCharacteristic? pressureChar;
       for (final svc in services) {
         for (final c in svc.characteristics) {
           if (c.uuid == charUuid) target = c;
+          if (c.uuid == pressureCharUuid) pressureChar = c;
         }
       }
-      
+
       if (target == null) {
         debugPrint('BLE: $key missing expected characteristic');
         await device.disconnect();
@@ -196,6 +264,26 @@ class BleManager implements LinkManager {
       _subs[key] = device.connectionState.listen((s) {
         if (s == BluetoothConnectionState.disconnected) _remove(key);
       });
+
+      // Live measurements (new firmware only; silently skipped otherwise).
+      _notifySubs.remove(key)?.cancel();
+      _pressureChars.remove(key);
+      if (pressureChar != null) {
+        try {
+          await pressureChar.setNotifyValue(true);
+          _pressureChars[key] = pressureChar;
+          _notifySubs[key] = pressureChar.onValueReceived.listen((raw) {
+            final v = double.tryParse(
+                utf8.decode(raw, allowMalformed: true).trim());
+            if (v != null) {
+              measured.value = {...measured.value, key: v};
+            }
+          });
+          debugPrint('BLE: live pressure enabled for $key');
+        } catch (e) {
+          debugPrint('BLE: pressure notify unavailable for $key: $e');
+        }
+      }
 
       state.value = state.value.copyWith(tires: {...state.value.tires, key});
       if (state.value.phase == LinkPhase.disconnected) {
@@ -278,14 +366,20 @@ class BleManager implements LinkManager {
 
   void _remove(String key) {
     _subs.remove(key)?.cancel();
+    _notifySubs.remove(key)?.cancel();
     _chars.remove(key);
+    _pressureChars.remove(key);
+    if (measured.value.containsKey(key)) {
+      final m = {...measured.value}..remove(key);
+      measured.value = m;
+    }
     final tires = {...state.value.tires}..remove(key);
     state.value = LinkState(
       phase: tires.isEmpty ? LinkPhase.disconnected : LinkPhase.connected,
       tires: tires,
     );
     final device = _devices[key];
-    if (device != null && !_userDisconnected) {
+    if (device != null && !_userDisconnected && !_suppressRetry.contains(key)) {
       message.value = '$key lost - auto-reconnecting...';
       // Clear Android's half-dead connection state first; without this the
       // next connect() often fails with status 133 (stale GATT handle).
@@ -358,6 +452,12 @@ class BleManager implements LinkManager {
     }
     _subs.clear();
     _chars.clear();
+    for (final s in _notifySubs.values) {
+      await s.cancel();
+    }
+    _notifySubs.clear();
+    _pressureChars.clear();
+    measured.value = const {};
     unackedBoards.value = const <String>{};
     final devices = List.of(_devices.values);
     _devices.clear();

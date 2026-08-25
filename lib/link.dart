@@ -24,6 +24,10 @@ abstract class LinkManager {
   ValueNotifier<String?> get message;
   ValueNotifier<Set<String>> get unackedBoards;
 
+  /// Live measured pressure per linked tire (tire id -> bar). Boards with
+  /// the a2 characteristic push this every ~2 s; empty when unavailable.
+  ValueNotifier<Map<String, double>> get measured;
+
   bool get isConnected;
 
   Future<void> connect();

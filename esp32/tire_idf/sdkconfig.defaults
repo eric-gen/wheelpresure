@@ -1,0 +1,13 @@
+# Lean, stable BLE stack config (NimBLE instead of Bluedroid: smaller + fewer bugs)
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=185
+
+# Keep the log quiet in the field
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_DEFAULT_LEVEL=3
+
+# FreeRTOS tick for smooth 2 s pressure task timing
+CONFIG_FREERTOS_HZ=1000

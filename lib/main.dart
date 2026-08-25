@@ -1,9 +1,57 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'devices_screen.dart';
 import 'link.dart';
+
+/* ---------------- toast system (single slot, non-blocking) ------------- */
+final ValueNotifier<String?> _toast = ValueNotifier(null);
+Timer? _toastTimer;
+
+void showAppToast(String msg) {
+  _toast.value = msg;
+  _toastTimer?.cancel();
+  _toastTimer = Timer(const Duration(seconds: 4), () => _toast.value = null);
+}
+
+class AppToast extends StatelessWidget {
+  const AppToast({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<String?>(
+      valueListenable: _toast,
+      builder: (context, msg, _) {
+        if (msg == null) return const SizedBox.shrink();
+        return Align(
+          alignment: Alignment.bottomCenter,
+          child: Material(
+            color: Theme.of(context).colorScheme.inverseSurface,
+            elevation: 4,
+            borderRadius: BorderRadius.circular(8),
+            child: InkWell(
+              onTap: () => _toast.value = null,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Text(
+                  msg,
+                  style: TextStyle(
+                      color: Theme.of(context).colorScheme.onInverseSurface,
+                      fontSize: 13),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
 
 void main() {
   FlutterError.onError = (details) {
@@ -151,9 +199,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
   }
 
   void _notify(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), duration: const Duration(seconds: 3)),
-    );
+    showAppToast(msg);
   }
 
   @override
@@ -162,9 +208,21 @@ class _OverviewScreenState extends State<OverviewScreen> {
       appBar: AppBar(
         centerTitle: true,
         title: const Text('Tire Pressure'),
-        actions: const [_LinkButton()],
+        actions: [
+          IconButton(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const DevicesScreen()),
+            ),
+            icon: const Icon(Icons.sensors),
+            tooltip: 'ESP32 devices',
+          ),
+          const _LinkButton(),
+        ],
       ),
-      body: Column(
+      body: Stack(
+        children: [
+          Column(
         children: [
           ValueListenableBuilder<Set<String>>(
             valueListenable: LinkManager.instance.unackedBoards,
@@ -198,6 +256,16 @@ class _OverviewScreenState extends State<OverviewScreen> {
               ),
             ),
           ),
+          ],
+        ),
+        // Single-slot toast: newest message replaces the old one, floats
+        // above the content without blocking interaction.
+        Positioned(
+          left: 24,
+          right: 24,
+          bottom: 24,
+          child: const AppToast(),
+        ),
         ],
       ),
     );
@@ -368,12 +436,22 @@ class _OverviewScreenState extends State<OverviewScreen> {
                 ),
               ),
               SizedBox(height: 4 * s),
-              Text(
-                '${tire.pressure.toStringAsFixed(1)} bar',
-                style: TextStyle(
-                  fontSize: (11 * s).clamp(11, 15),
-                  color: scheme.onSurfaceVariant,
-                ),
+              // Live measurement when the board reports one (new firmware),
+              // otherwise the last commanded value.
+              ValueListenableBuilder<Map<String, double>>(
+                valueListenable: LinkManager.instance.measured,
+                builder: (context, measured, _) {
+                  final live = measured[name];
+                  final shown =
+                      live != null ? '${live.toStringAsFixed(2)} bar' : '${tire.pressure.toStringAsFixed(1)} bar';
+                  return Text(
+                    shown,
+                    style: TextStyle(
+                      fontSize: (11 * s).clamp(11, 15),
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  );
+                },
               ),
             ],
             ),

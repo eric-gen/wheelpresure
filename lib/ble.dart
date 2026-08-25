@@ -34,6 +34,7 @@ class BleManager implements LinkManager {
   final Map<String, BluetoothDevice> _devices = {};
   final Map<String, BluetoothCharacteristic> _chars = {};
   final Map<String, StreamSubscription<BluetoothConnectionState>> _subs = {};
+  final Map<String, Timer> _retryTimers = {};
   bool _userDisconnected = false;
 
   @override
@@ -190,6 +191,7 @@ class BleManager implements LinkManager {
 
       _devices[key] = device;
       _chars[key] = target;
+      _retryTimers.remove(key)?.cancel();
       _subs[key]?.cancel();
       _subs[key] = device.connectionState.listen((s) {
         if (s == BluetoothConnectionState.disconnected) _remove(key);
@@ -217,8 +219,12 @@ class BleManager implements LinkManager {
 
 
   void _scheduleReconnect(String key, BluetoothDevice device) {
-    if (_userDisconnected || _devices.containsKey(key)) return;
-    Timer(retryDelay, () async {
+    if (_userDisconnected) return;
+    // One retry loop per board: replace any pending timer instead of
+    // bailing out (the old _devices.containsKey guard silently killed
+    // every post-loss reconnect).
+    _retryTimers[key]?.cancel();
+    _retryTimers[key] = Timer(retryDelay, () async {
       if (_userDisconnected || _chars.containsKey(key)) return;
       debugPrint('BLE: reconnecting $key...');
       // A freshly scanned device object sidesteps the stale-handle
@@ -343,6 +349,10 @@ class BleManager implements LinkManager {
   @override
   Future<void> disconnect() async {
     _userDisconnected = true;
+    for (final t in _retryTimers.values) {
+      t.cancel();
+    }
+    _retryTimers.clear();
     for (final sub in _subs.values) {
       await sub.cancel();
     }

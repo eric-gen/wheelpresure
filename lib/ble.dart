@@ -221,7 +221,12 @@ class BleManager implements LinkManager {
     Timer(retryDelay, () async {
       if (_userDisconnected || _chars.containsKey(key)) return;
       debugPrint('BLE: reconnecting $key...');
-      await _link(key, device);
+      // A freshly scanned device object sidesteps the stale-handle
+      // status-133 problem; the cached object often never connects again.
+      final fresh = await _findBoard(key);
+      final target = fresh ?? device;
+      if (fresh != null) _devices[key] = fresh;
+      await _link(key, target);
     });
   }
 

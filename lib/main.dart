@@ -119,6 +119,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
       ),
     );
     if (result == null) return;
+    final old = [for (final t in _tires) t.pressure];
     setState(() {
       if (isAll) {
         for (var i = 0; i < _tires.length; i++) {
@@ -130,9 +131,23 @@ class _OverviewScreenState extends State<OverviewScreen> {
     });
     // One message with every pressure, fixed order FL,FR,RL,RR:
     // "2.4,3.4,1.2,2.5". Boards pick their own slot by TIRE_ID.
-    LinkManager.instance.sendPressures([
+    await LinkManager.instance.sendPressures([
       for (final t in _tires) t.pressure,
     ]);
+    // A board that never confirmed never applied the value - roll its
+    // tile back so the screen shows what the hardware is actually doing.
+    final unacked = LinkManager.instance.unackedBoards.value;
+    if (unacked.isNotEmpty) {
+      setState(() {
+        for (var i = 0; i < _tires.length; i++) {
+          if (unacked.contains(_tires[i].name)) {
+            _tires[i] = _tires[i].copyWith(pressure: old[i]);
+          }
+        }
+      });
+      _notify('No confirmation from: ${unacked.toList()..sort()} - '
+          'value reverted');
+    }
   }
 
   void _notify(String msg) {

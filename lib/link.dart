@@ -1,9 +1,6 @@
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 
 import 'ble.dart';
-import 'classic_manager.dart';
 
 enum LinkPhase { disconnected, scanning, connecting, connected }
 
@@ -36,7 +33,9 @@ abstract class LinkManager {
   static final LinkManager instance = _pick();
 
   static LinkManager _pick() {
-    if (Platform.isIOS) return BleManager.instance;
-    return ClassicManager.instance;
+    // BLE everywhere now: one firmware (READ|WRITE characteristic with
+    // read-back ACKs) serves Android and iOS alike. ClassicManager stays
+    // available for the old SPP firmware if ever needed.
+    return BleManager.instance;
   }
 }

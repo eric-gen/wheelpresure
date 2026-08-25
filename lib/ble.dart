@@ -7,9 +7,10 @@ import 'package:permission_handler/permission_handler.dart';
 
 import 'link.dart';
 
-/// Bluetooth LE transport - used on iOS (and anywhere without classic BT).
-/// Requires the S3 firmware with a notify-capable characteristic so boards
-/// can send "ACK:TIRE_ID" replies.
+/// Bluetooth LE transport - used on every platform.
+/// Matches the current firmware: the characteristic is READ and WRITE only
+/// (no notify) and a board confirms by rewriting its value to
+/// "ACK:TIRE_ID:bar", which we pick up by polling reads.
 class BleManager implements LinkManager {
   BleManager._();
   static final instance = BleManager._();
@@ -28,13 +29,11 @@ class BleManager implements LinkManager {
   @override
   final unackedBoards = ValueNotifier<Set<String>>(const <String>{});
 
-  static const ackTimeout = Duration(milliseconds: 1500);
+  static const retryDelay = Duration(seconds: 5);
 
   final Map<String, BluetoothDevice> _devices = {};
   final Map<String, BluetoothCharacteristic> _chars = {};
   final Map<String, StreamSubscription<BluetoothConnectionState>> _subs = {};
-  final Map<String, String> _rxBuffers = {};
-  Set<String> _pendingAcks = const <String>{};
   bool _userDisconnected = false;
 
   @override
@@ -151,8 +150,6 @@ class BleManager implements LinkManager {
         await device.disconnect();
         return;
       }
-      await target.setNotifyValue(true);
-      target.onValueReceived.listen((value) => _onData(key, value));
       _devices[key] = device;
       _chars[key] = target;
       _subs[key]?.cancel();
@@ -176,28 +173,38 @@ class BleManager implements LinkManager {
     }
   }
 
-  void _scheduleReconnect(String key, BluetoothDevice device) {
-    if (_userDisconnected || _devices.containsKey(key)) return;
-    Timer(const Duration(seconds: 5), () async {
+  void _scheduleReconnect(String key, BluetoothDevice device) {    if (_userDisconnected || _devices.containsKey(key)) return;
+    Timer(retryDelay, () async {
       if (_userDisconnected || _chars.containsKey(key)) return;
       debugPrint('BLE: reconnecting $key...');
       await _link(key, device);
     });
   }
 
-  void _onData(String key, List<int> raw) {
-    var buffer =
-        (_rxBuffers[key] ?? '') + utf8.decode(raw, allowMalformed: true);
-    int index;
-    while ((index = buffer.indexOf('\n')) >= 0) {
-      final line = buffer.substring(0, index).trim();
-      buffer = buffer.substring(index + 1);
-      debugPrint('BLE [$key] received: "$line"');
-      if (line == 'ACK:$key') {
-        _pendingAcks = {..._pendingAcks}..remove(key);
+  /// Poll-reads the characteristic until it carries this board's ack for
+  /// exactly the value we just sent (~1.5 s total, like the webapp).
+  Future<bool> _awaitAck(
+    String key,
+    BluetoothCharacteristic c,
+    double want,
+  ) async {
+    for (var i = 0; i < 6; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      try {
+        final s = utf8.decode(await c.read(), allowMalformed: true).trim();
+        debugPrint('BLE [$key] read: "$s"');
+        final parts = s.split(':');
+        if (parts.length >= 3 &&
+            parts[0] == 'ACK' &&
+            parts[1].toUpperCase() == key) {
+          final v = double.tryParse(parts[2]);
+          if (v != null && (v - want).abs() < 0.05) return true;
+        }
+      } catch (_) {
+        // transient read error - keep polling
       }
     }
-    _rxBuffers[key] = buffer;
+    return false;
   }
 
   String? _keyFromName(String? name) {
@@ -214,7 +221,6 @@ class BleManager implements LinkManager {
   void _remove(String key) {
     _subs.remove(key)?.cancel();
     _chars.remove(key);
-    _rxBuffers.remove(key);
     final tires = {...state.value.tires}..remove(key);
     state.value = LinkState(
       phase: tires.isEmpty ? LinkPhase.disconnected : LinkPhase.connected,
@@ -236,7 +242,6 @@ class BleManager implements LinkManager {
     }
     _subs.clear();
     _chars.clear();
-    _rxBuffers.clear();
     unackedBoards.value = const <String>{};
     final devices = List.of(_devices.values);
     _devices.clear();
@@ -256,22 +261,30 @@ class BleManager implements LinkManager {
     // needed: a BLE write is one complete message.
     final payload =
         pressures.map((p) => p.toStringAsFixed(1)).join(',').codeUnits;
-    final targets = _chars.keys.toList();
-    _pendingAcks = {...targets};
-    final writeFailed = <String>{};
-    for (final k in targets) {
-      try {
-        await _chars[k]!.write(payload);
-      } catch (e) {
-        debugPrint('BLE write to $k failed: $e');
-        writeFailed.add(k);
-      }
+    const keys = ['FL', 'FR', 'RL', 'RR'];
+    final failed = <String>{};
+    final jobs = <Future<void>>[];
+    for (final entry in _chars.entries) {
+      final k = entry.key;
+      final idx = keys.indexOf(k);
+      if (idx < 0 || idx >= pressures.length) continue;
+      final c = entry.value;
+      final want = pressures[idx];
+      jobs.add(() async {
+        try {
+          await c.write(payload);
+        } catch (e) {
+          debugPrint('BLE write to $k failed: $e');
+          failed.add(k);
+          return;
+        }
+        if (!await _awaitAck(k, c, want)) failed.add(k);
+      }());
     }
-    await Future<void>.delayed(ackTimeout);
-    final failed = {...writeFailed, ..._pendingAcks};
+    await Future.wait(jobs);
     unackedBoards.value = failed;
     if (failed.isEmpty) {
-      debugPrint('BLE: all boards acknowledged: $targets');
+      debugPrint('BLE: all boards acknowledged: ${_chars.keys.toList()..sort()}');
     }
   }
 }

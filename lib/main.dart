@@ -104,7 +104,8 @@ class _OverviewScreenState extends State<OverviewScreen> {
     } else {
       final name = _tires[index].name;
       if (!linked.contains(name)) {
-        _notify('$name is not linked - connect or wait for auto-reconnect');
+        _notify('$name is not linked - trying to reconnect...');
+        LinkManager.instance.reconnectOne(name);
         return;
       }
     }

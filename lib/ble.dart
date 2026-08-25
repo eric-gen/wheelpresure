@@ -289,6 +289,53 @@ class BleManager implements LinkManager {
   }
 
   @override
+  Future<void> reconnectOne(String key) async {
+    if (_chars.containsKey(key)) return;
+    var device = _devices[key];
+    // Never seen this session? Quick 3 s targeted scan to find it.
+    device ??= await _findBoard(key);
+    if (device == null) {
+      message.value = '$key not found - is the board powered?';
+      _scheduleReconnectIfKnown(key);
+      return;
+    }
+    debugPrint('BLE: manual reconnect attempt for $key');
+    await _link(key, device);
+    if (!_chars.containsKey(key)) {
+      // keep trying in the background like any other lost board
+      _devices[key] = device;
+      _scheduleReconnect(key, device);
+    }
+  }
+
+  void _scheduleReconnectIfKnown(String key) {
+    final d = _devices[key];
+    if (d != null && !_userDisconnected) _scheduleReconnect(key, d);
+  }
+
+  /// Short unfiltered scan that returns just this tire's board (or null).
+  Future<BluetoothDevice?> _findBoard(String key) async {
+    BluetoothDevice? hit;
+    late final StreamSubscription<List<ScanResult>> sub;
+    sub = FlutterBluePlus.scanResults.listen((results) {
+      for (final r in results) {
+        final name = r.advertisementData.advName.isNotEmpty
+            ? r.advertisementData.advName
+            : r.device.platformName;
+        if (_keyFromName(name) == key) hit ??= r.device;
+      }
+    });
+    try {
+      await FlutterBluePlus.startScan();
+      await FlutterBluePlus.isScanning.where((s) => s).first;
+      Timer(const Duration(seconds: 3), () => FlutterBluePlus.stopScan());
+      await FlutterBluePlus.isScanning.where((s) => !s).first;
+    } catch (_) {}
+    await sub.cancel();
+    return hit;
+  }
+
+  @override
   Future<void> disconnect() async {
     _userDisconnected = true;
     for (final sub in _subs.values) {

@@ -30,6 +30,9 @@ abstract class LinkManager {
   Future<void> disconnect();
   Future<void> sendPressures(List<double> pressures);
 
+  /// Try to reconnect one specific tire immediately (tap on a dim tile).
+  Future<void> reconnectOne(String key);
+
   static final LinkManager instance = _pick();
 
   static LinkManager _pick() {

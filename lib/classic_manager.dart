@@ -259,4 +259,9 @@ class ClassicManager implements LinkManager {
       debugPrint('Classic: all boards acknowledged: $targets');
     }
   }
+
+  @override
+  Future<void> reconnectOne(String key) async {
+    // Classic transport is retired; BLE handles every platform now.
+  }
 }

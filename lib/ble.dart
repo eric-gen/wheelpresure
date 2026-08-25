@@ -83,7 +83,6 @@ class BleManager implements LinkManager {
       var devicesSeen = 0;
       late final StreamSubscription<List<ScanResult>> scanSub;
       scanSub = FlutterBluePlus.scanResults.listen((results) {
-        // Unfiltered scan: count everything so failures can be told apart.
         devicesSeen =
             devicesSeen > results.length ? devicesSeen : results.length;
         for (final r in results) {
@@ -99,13 +98,24 @@ class BleManager implements LinkManager {
         }
       });
 
-      // FIX: Added withServices filtering. Samsung devices running aggressive 
-      // battery managers drop or delay background, unfiltered scans.
-      await FlutterBluePlus.startScan(
-        withServices: [serviceUuid],
-        timeout: const Duration(seconds: 8),
-      );
-      
+      // --- SAMSUNG WARM-UP CYCLE ---
+      await FlutterBluePlus.startScan();          // no timeout param!
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await FlutterBluePlus.stopScan();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+
+      // Main scan: unfiltered, we match by name ourselves. Manual timer +
+      // waiting on isScanning instead of the timeout parameter, which some
+      // Samsung stacks abort immediately.
+      debugPrint('BLE: starting main scan');
+      await FlutterBluePlus.startScan();
+      await FlutterBluePlus.isScanning.where((s) => s).first;
+      Timer(const Duration(seconds: 8), () {
+        FlutterBluePlus.stopScan();
+      });
+      await FlutterBluePlus.isScanning.where((s) => !s).first;
+      debugPrint('BLE: main scan finished');
+
       await scanSub.cancel();
       await FlutterBluePlus.stopScan();
       debugPrint(

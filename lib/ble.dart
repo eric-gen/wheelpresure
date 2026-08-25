@@ -44,17 +44,22 @@ class BleManager implements LinkManager {
     if (state.value.phase != LinkPhase.disconnected) return;
     try {
       _userDisconnected = false;
+      
+      // FIX: Added Permission.location. Samsung silently returns 0 scan 
+      // results without a granted location permission when neverForLocation is omitted.
       final perms = await [
         Permission.bluetoothScan,
         Permission.bluetoothConnect,
+        Permission.location,
       ].request();
+      
       debugPrint('BLE permissions: $perms');
       final denied =
           perms.entries.where((e) => !e.value.isGranted).map((e) => e.key);
       if (denied.isNotEmpty) {
         message.value =
             'Permission denied (${denied.join(", ")}) - allow "Nearby '
-            'devices" / "Bluetooth" for this app in Settings';
+            'devices" and "Location" for this app in Settings';
         return;
       }
 
@@ -94,7 +99,13 @@ class BleManager implements LinkManager {
         }
       });
 
-      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 8));
+      // FIX: Added withServices filtering. Samsung devices running aggressive 
+      // battery managers drop or delay background, unfiltered scans.
+      await FlutterBluePlus.startScan(
+        withServices: [serviceUuid],
+        timeout: const Duration(seconds: 8),
+      );
+      
       await scanSub.cancel();
       await FlutterBluePlus.stopScan();
       debugPrint(
@@ -106,7 +117,7 @@ class BleManager implements LinkManager {
         _setPhase(LinkPhase.disconnected);
         message.value =
             devicesSeen == 0
-                ? 'Scan saw no devices at all - check Bluetooth permission'
+                ? 'Scan saw no devices at all - check Bluetooth & Location settings'
                 : 'Scan saw $devicesSeen device(s), but no TireESP32-xx - '
                     'check the boards are powered and flashed';
         return;
@@ -173,7 +184,8 @@ class BleManager implements LinkManager {
     }
   }
 
-  void _scheduleReconnect(String key, BluetoothDevice device) {    if (_userDisconnected || _devices.containsKey(key)) return;
+  void _scheduleReconnect(String key, BluetoothDevice device) {
+    if (_userDisconnected || _devices.containsKey(key)) return;
     Timer(retryDelay, () async {
       if (_userDisconnected || _chars.containsKey(key)) return;
       debugPrint('BLE: reconnecting $key...');

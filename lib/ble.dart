@@ -276,6 +276,13 @@ class BleManager implements LinkManager {
     final device = _devices[key];
     if (device != null && !_userDisconnected) {
       message.value = '$key lost - auto-reconnecting...';
+      // Clear Android's half-dead connection state first; without this the
+      // next connect() often fails with status 133 (stale GATT handle).
+      () async {
+        try {
+          await device.disconnect();
+        } catch (_) {}
+      }();
       _scheduleReconnect(key, device);
     }
     debugPrint('BLE: lost $key');

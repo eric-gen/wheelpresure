@@ -144,29 +144,47 @@ class BleManager implements LinkManager {
 
   Future<void> _link(String key, BluetoothDevice device) async {
     try {
+      debugPrint('BLE: Attempting connection to $key (${device.remoteId})...');
+      
       await device.connect(
         license: License.nonprofit,
-        timeout: const Duration(seconds: 8),
-        autoConnect: false,
+        timeout: const Duration(seconds: 10),
+        autoConnect: false, // Forces an immediate active connection attempt
+        mtu: null,          // FIX 1: Stops FBP from forcing a 512 MTU that crashes ESP32 stacks
       );
+
+      // FIX 2: Give Samsung's GATT client 500ms to negotiate the connection baseline
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+
+      // FIX 3: Ensure the device is actually marked as connected before pulling services
+      final currentConnectionState = await device.connectionState.first;
+      if (currentConnectionState != BluetoothConnectionState.connected) {
+        throw Exception("Device reported connected, but state stream is $currentConnectionState");
+      }
+
+      debugPrint('BLE: Connected to $key. Discovering services...');
       final services = await device.discoverServices();
+      
       BluetoothCharacteristic? target;
       for (final svc in services) {
         for (final c in svc.characteristics) {
           if (c.uuid == charUuid) target = c;
         }
       }
+      
       if (target == null) {
         debugPrint('BLE: $key missing expected characteristic');
         await device.disconnect();
         return;
       }
+
       _devices[key] = device;
       _chars[key] = target;
       _subs[key]?.cancel();
       _subs[key] = device.connectionState.listen((s) {
         if (s == BluetoothConnectionState.disconnected) _remove(key);
       });
+
       state.value = state.value.copyWith(tires: {...state.value.tires, key});
       if (state.value.phase == LinkPhase.disconnected) {
         _setPhase(LinkPhase.connected);
@@ -174,15 +192,19 @@ class BleManager implements LinkManager {
       if (unackedBoards.value.contains(key)) {
         unackedBoards.value = {...unackedBoards.value}..remove(key);
       }
-      debugPrint('BLE: connected $key');
+      debugPrint('BLE: Successfully ready and linked $key');
     } catch (e) {
       debugPrint('BLE: failed to connect $key: $e');
+      // If a connection attempt breaks mid-way, explicitly clean it up
+      try { await device.disconnect(); } catch (_) {}
     }
+
     if (!_chars.containsKey(key)) {
       // Board seen but not linked yet - keep trying in the background.
       _scheduleReconnect(key, device);
     }
   }
+
 
   void _scheduleReconnect(String key, BluetoothDevice device) {
     if (_userDisconnected || _devices.containsKey(key)) return;
@@ -206,6 +228,8 @@ class BleManager implements LinkManager {
         final s = utf8.decode(await c.read(), allowMalformed: true).trim();
         debugPrint('BLE [$key] read: "$s"');
         final parts = s.split(':');
+        
+        // FIX: access the array elements using indices [0], [1], and [2]
         if (parts.length >= 3 &&
             parts[0] == 'ACK' &&
             parts[1].toUpperCase() == key) {
@@ -218,6 +242,7 @@ class BleManager implements LinkManager {
     }
     return false;
   }
+
 
   String? _keyFromName(String? name) {
     if (name == null) return null;

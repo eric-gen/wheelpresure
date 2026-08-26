@@ -171,7 +171,6 @@ class _OverviewScreenState extends State<OverviewScreen> {
             icon: const Icon(Icons.sensors),
             tooltip: 'ESP32 devices',
           ),
-          const _LinkButton(),
         ],
       ),
       body: Stack(
@@ -552,41 +551,3 @@ class _PressureEditScreenState extends State<PressureEditScreen> {
   }
 }
 
-class _LinkButton extends StatelessWidget {
-  const _LinkButton();
-
-  @override
-  Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: LinkManager.instance.state,
-      builder: (context, _) {
-        final state = LinkManager.instance.state.value;
-        final (icon, tooltip) = switch (state.phase) {
-          LinkPhase.connected => (
-            Icons.bluetooth_connected,
-            'Connected: ${state.tires.toList()..sort()} - tap to disconnect',
-          ),
-          LinkPhase.scanning || LinkPhase.connecting => (
-            Icons.bluetooth_searching,
-            'Connecting...',
-          ),
-          LinkPhase.disconnected => (
-            Icons.bluetooth_disabled,
-            'Connect ESP32 boards',
-          ),
-        };
-        return IconButton(
-          onPressed: () {
-            if (LinkManager.instance.isConnected) {
-              LinkManager.instance.disconnect();
-            } else if (state.phase == LinkPhase.disconnected) {
-              LinkManager.instance.connect();
-            }
-          },
-          icon: Icon(icon),
-          tooltip: tooltip,
-        );
-      },
-    );
-  }
-}

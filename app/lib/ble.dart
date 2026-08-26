@@ -84,10 +84,13 @@ class BleManager implements LinkManager {
   @override
   bool get isConnected => _chars.isNotEmpty;
 
-  String? _keyFromName(String? name) {
-    if (name == null || !name.startsWith('TireESP32-')) return null;
-    final suffix = name.substring('TireESP32-'.length).trim().toUpperCase();
-    return suffix.isEmpty ? null : suffix;
+  /// Device key = MAC address (never changes, even when a board renames
+  /// itself after tire assignment). _names keeps the advertised label.
+  final Map<String, String> _names = {};
+
+  String labelOf(String key) {
+    final n = _names[key];
+    return (n == null || n.isEmpty) ? 'ESP32 $key' : n;
   }
 
   void _registerTire(String key, String tire) {
@@ -189,9 +192,11 @@ class BleManager implements LinkManager {
         if (seenNames.add(label)) {
           debugPrint('BLE heard: "$label" ${r.device.remoteId.str}');
         }
-        final key = _keyFromName(name);
-        if (key != null && !found.containsKey(key)) {
-          debugPrint('BLE board found: "$name"');
+        if (!name.startsWith('TireESP32-')) continue;
+        final key = r.device.remoteId.str; // MAC: stable identity
+        if (name.isNotEmpty) _names[key] = name;
+        if (!found.containsKey(key)) {
+          debugPrint('BLE board found: "$name" ($key)');
           found[key] = r.device;
         }
       }
@@ -409,10 +414,7 @@ class BleManager implements LinkManager {
     late final StreamSubscription<List<ScanResult>> sub;
     sub = FlutterBluePlus.scanResults.listen((results) {
       for (final r in results) {
-        final name = r.advertisementData.advName.isNotEmpty
-            ? r.advertisementData.advName
-            : r.device.platformName;
-        if (_keyFromName(name) == key) hit ??= r.device;
+        if (r.device.remoteId.str == key) hit ??= r.device;
       }
     });
     try {

@@ -186,9 +186,6 @@ class _DevicesScreenState extends State<DevicesScreen> {
                     ),
                   for (final key in known)
                     Builder(builder: (context) {
-                      final dev = _results[key] ??
-                          _seen[key] ??
-                          _ble.discovered[key];
                       final online = _results.containsKey(key);
                       return ListTile(
                         leading: Icon(
@@ -199,11 +196,11 @@ class _DevicesScreenState extends State<DevicesScreen> {
                               ? scheme.onSurfaceVariant
                               : scheme.outlineVariant,
                         ),
-                        title: Text('TireESP32-$key'),
-                        subtitle: Text(
-                          '${dev?.remoteId.str ?? ''}'
-                          '${online ? '' : ' - offline'}',
-                        ),
+                      title: Text(_ble.labelOf(key)),
+                      subtitle: Text(
+                        '${online ? 'in range' : 'offline'}'
+                        '${key.isEmpty ? '' : ' - $key'}',
+                      ),
                         trailing: _busyRow(key) ??
                             (pending.contains(key)
                                 ? null

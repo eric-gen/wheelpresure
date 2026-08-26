@@ -15,9 +15,9 @@
 #include <stdlib.h>
 #include <math.h>
 
-#include "ble_hs.h"
-#include "ble_svc_gap.h"
-#include "ble_svc_gatt.h"
+#include "host/ble_hs.h"
+#include "services/gap/ble_svc_gap.h"
+#include "services/gatt/ble_svc_gatt.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "nvs_flash.h"

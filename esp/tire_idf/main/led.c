@@ -70,7 +70,7 @@ void led_start(void)
         led_strip_clear(s_strip);
     }
 
-    if (xTaskCreate(led_task, "led", 2048, NULL, 4, NULL) != pdPASS) {
+    if (xTaskCreate(led_task, "led", 4096, NULL, 4, NULL) != pdPASS) {
         s_strip = NULL;
     }
 }

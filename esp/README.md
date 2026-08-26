@@ -13,6 +13,20 @@ idf.py build flash monitor
 
 Serial monitor (115200) shows the assigned tire and live pressure.
 
+### Tire assignment & reflashing
+
+The assigned tire is stored in **NVS** (a separate flash partition).
+`idf.py flash` does NOT touch NVS, so a board keeps its tire across
+reflashes and firmware updates - exactly what you want in the field.
+
+To start over (forget the tire, back to the first-connect assignment flow):
+
+```bash
+idf.py -p COMx erase-flash   # wipes NVS too
+idf.py -p COMx build flash monitor
+```
+
+
 ### ESP-IDF setup explained (Windows)
 
 `idf.py` is the build/flash tool that ships with **ESP-IDF** - it does not

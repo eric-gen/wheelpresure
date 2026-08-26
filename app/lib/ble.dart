@@ -192,7 +192,9 @@ class BleManager implements LinkManager {
         if (seenNames.add(label)) {
           debugPrint('BLE heard: "$label" ${r.device.remoteId.str}');
         }
-        if (!name.startsWith('TireESP32-')) continue;
+        if (!name.startsWith('WHC-') && !name.startsWith('TireESP32-')) {
+          continue;
+        }
         final key = r.device.remoteId.str; // MAC: stable identity
         if (name.isNotEmpty) _names[key] = name;
         if (!found.containsKey(key)) {

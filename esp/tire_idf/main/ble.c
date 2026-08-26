@@ -1,4 +1,4 @@
-/*
+﻿/*
  * BLE GATT server (NimBLE, ESP-IDF 5.4).
  *
  * Service  5f1d16a0-... (same as the Arduino firmware, apps are unchanged)
@@ -25,6 +25,7 @@
 #include "pressure_sim.h"
 #include "tire_pressure.h"
 #include "ble.h"
+#include "led.h"
 
 char g_tire[8] = { 0 };
 
@@ -84,6 +85,7 @@ static int cmd_access(uint16_t conn_handle, uint16_t attr_handle,
             strlcpy(g_tire, tire, sizeof(g_tire));
             snprintf(buf, sizeof(buf), "ACK:%s:0", g_tire);
             app_log("assigned to tire %s (stored in NVS)", g_tire);
+            led_pairing(false); /* assignment done: pairing complete */
         } else {
             app_log("bad assignment: '%s'", buf);
             strcpy(buf, "ERR");
@@ -253,6 +255,7 @@ int gap_event_cb(struct ble_gap_event *event, void *arg)
             conn_handle = event->connect.conn_handle;
             subscribed = false;
             app_log("phone connected");
+            led_pairing(true);
         } else {
             app_log("connect failed rc=%d - advertising again",
                     event->connect.status);
@@ -263,6 +266,7 @@ int gap_event_cb(struct ble_gap_event *event, void *arg)
     case BLE_GAP_EVENT_DISCONNECT:
         app_log("phone disconnected (reason=%d) - advertising again",
                 event->disconnect.reason);
+        led_pairing(false);
         conn_handle = BLE_HS_CONN_HANDLE_NONE;
         subscribed = false;
         advertise();
@@ -273,6 +277,9 @@ int gap_event_cb(struct ble_gap_event *event, void *arg)
             event->subscribe.cur_notify != 0 ||
             event->subscribe.cur_indicate != 0;
         app_log("subscribe: %d", subscribed);
+        if (subscribed) {
+            led_pairing(false); /* app is fully hooked: pairing complete */
+        }
         return 0;
 
     case BLE_GAP_EVENT_MTU:
@@ -301,9 +308,9 @@ static void on_sync(void)
      * every board is uniquely identifiable in the devices screen. */
     char name[32];
     if (g_tire[0]) {
-        snprintf(name, sizeof(name), "TireESP32-%s", g_tire);
+        snprintf(name, sizeof(name), "WHC-%s", g_tire);
     } else {
-        snprintf(name, sizeof(name), "TireESP32-%02X%02X",
+        snprintf(name, sizeof(name), "WHC-%02X%02X",
                  addr_val[1], addr_val[0]);
     }
     ble_svc_gap_device_name_set(name);

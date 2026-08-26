@@ -5,6 +5,7 @@
 #include "esp_log.h"
 
 #include "ble.h"
+#include "led.h"
 #include "pressure_sim.h"
 #include "tire_pressure.h"
 
@@ -38,6 +39,7 @@ void app_main(void)
     app_log("=== Tire pressure board (ESP-IDF) ===");
 
     ble_start();
+    led_start();
 
     if (xTaskCreate(pressure_task, "pressure", 3072, NULL, 5, NULL)
             != pdPASS) {

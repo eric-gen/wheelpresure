@@ -45,6 +45,19 @@ class BleManager implements LinkManager {
   /// Boards that are connected but have no tire assigned yet.
   final pendingAssign = ValueNotifier<Set<String>>(const <String>{});
 
+  /// Device keys currently in the auto-reconnect loop (top banner shows this).
+  final reconnecting = ValueNotifier<Set<String>>(const <String>{});
+
+  void _setReconnecting(String key, bool active) {
+    final s = {...reconnecting.value};
+    if (active) {
+      s.add(key);
+    } else {
+      s.remove(key);
+    }
+    reconnecting.value = s;
+  }
+
   static const retryDelay = Duration(seconds: 5);
 
   final Map<String, BluetoothDevice> _devices = {};
@@ -241,6 +254,7 @@ class BleManager implements LinkManager {
       _devices[key] = device;
       _chars[key] = target;
       _retryTimers.remove(key)?.cancel();
+      _setReconnecting(key, false);
       _subs[key]?.cancel();
       _subs[key] = device.connectionState.listen((s) {
         if (s == BluetoothConnectionState.disconnected) _remove(key);
@@ -355,6 +369,7 @@ class BleManager implements LinkManager {
     final b = _devices[key];
     if (b == null) return;
     _retryTimers.remove(key)?.cancel();
+    _setReconnecting(key, false);
     _suppressRetry.add(key);
     try {
       await b.disconnect();
@@ -370,6 +385,7 @@ class BleManager implements LinkManager {
   void _scheduleReconnect(String key, BluetoothDevice device) {
     if (_userDisconnected) return;
     _retryTimers[key]?.cancel();
+    _setReconnecting(key, true);
     _retryTimers[key] = Timer(retryDelay, () async {
       if (_userDisconnected || _chars.containsKey(key)) return;
       debugPrint('BLE: reconnecting $key...');
@@ -476,6 +492,7 @@ class BleManager implements LinkManager {
       t.cancel();
     }
     _retryTimers.clear();
+    reconnecting.value = const {};
     for (final sub in _subs.values) {
       await sub.cancel();
     }

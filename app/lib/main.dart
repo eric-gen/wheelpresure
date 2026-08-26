@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'ble.dart';
 import 'devices_screen.dart';
 import 'link.dart';
 import 'toast.dart';
@@ -78,9 +79,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
     final msg = LinkManager.instance.message.value;
     if (msg == null || !mounted) return;
     LinkManager.instance.message.value = null;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), duration: const Duration(seconds: 3)),
-    );
+    showAppToast(msg);
   }
 
   @override
@@ -184,6 +183,49 @@ class _OverviewScreenState extends State<OverviewScreen> {
             builder: (context, unacked, _) {
               if (unacked.isEmpty) return const SizedBox.shrink();
               return _warningBanner(unacked.toList()..sort());
+            },
+          ),
+          // Connection activity strip: shows scanning / connecting /
+          // auto-reconnecting state at the top while it is happening.
+          ValueListenableBuilder<Set<String>>(
+            valueListenable: BleManager.instance.reconnecting,
+            builder: (context, retryKeys, _) {
+              return ListenableBuilder(
+                listenable: LinkManager.instance.state,
+                builder: (context, _) {
+                  final phase = LinkManager.instance.state.value.phase;
+                  String? text;
+                  if (retryKeys.isNotEmpty) {
+                    final names = retryKeys
+                        .map((k) => BleManager.instance.tireOf(k) ?? k)
+                        .toList()
+                      ..sort();
+                    text = 'Auto-reconnecting ${names.join(", ")}...';
+                  } else if (phase == LinkPhase.scanning) {
+                    text = 'Scanning for boards...';
+                  } else if (phase == LinkPhase.connecting) {
+                    text = 'Connecting...';
+                  }
+                  if (text == null) return const SizedBox.shrink();
+                  return Container(
+                    width: double.infinity,
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    padding:
+                        const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
+                    child: Row(
+                      children: [
+                        const SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(text, style: const TextStyle(fontSize: 13)),
+                      ],
+                    ),
+                  );
+                },
+              );
             },
           ),
           Expanded(

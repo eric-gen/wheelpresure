@@ -80,11 +80,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
   Future<void> _assign(String key, String tire) async {
     setState(() => _assigning.add(key));
     final ok = await _ble.assignTire(key, tire);
-    if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Assigning $key to $tire failed')),
-      );
-    }
+    if (!ok && mounted) showAppToast('Assigning $key to $tire failed');
     if (mounted) setState(() => _assigning.remove(key));
   }
 

@@ -41,6 +41,8 @@ class BleManager implements LinkManager {
   final unackedBoards = ValueNotifier<Set<String>>(const <String>{});
   @override
   final measured = ValueNotifier<Map<String, double>>(const {});
+  @override
+  final staleTires = ValueNotifier<Set<String>>(const <String>{});
 
   /// Boards that are connected but have no tire assigned yet.
   final pendingAssign = ValueNotifier<Set<String>>(const <String>{});
@@ -66,6 +68,7 @@ class BleManager implements LinkManager {
   final Map<String, StreamSubscription<BluetoothConnectionState>> _subs = {};
   final Map<String, StreamSubscription<List<int>>> _notifySubs = {};
   final Map<String, Timer> _retryTimers = {};
+  Timer? _pollTimer;
   final Map<String, String> _keyToTire = {};
   final Set<String> _suppressRetry = {};
   bool _userDisconnected = false;
@@ -113,6 +116,43 @@ class BleManager implements LinkManager {
       phase: LinkPhase.connected,
       tires: tires,
     );
+    // New tire starts as "unproven": the first successful poll/notify
+    // clears it. Poll timer keeps checking every 10 s.
+    staleTires.value = {...staleTires.value, tire};
+    _startPollTimer();
+  }
+
+  void _startPollTimer() {
+    if (_pollTimer != null) return;
+    _pollTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (_pressureChars.isEmpty || _userDisconnected) return;
+      _pollPressures();
+    });
+    _pollPressures();
+  }
+
+  /// Reads the live-pressure characteristic of every linked board.
+  /// A failed read marks that tire stale: no data shown + edits locked.
+  Future<void> _pollPressures() async {
+    for (final e in _pressureChars.entries) {
+      final key = e.key;
+      final tire = _keyToTire[key];
+      if (tire == null) continue;
+      double? v;
+      try {
+        v = double.tryParse(
+            utf8.decode(await e.value.read(), allowMalformed: true).trim());
+      } catch (_) {}
+      final s = {...staleTires.value};
+      if (v != null) {
+        measured.value = {...measured.value, tire: v};
+        s.remove(tire);
+      } else {
+        s.add(tire);
+        debugPrint('BLE [$tire] pressure poll failed - marking stale');
+      }
+      staleTires.value = s;
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -303,7 +343,8 @@ class BleManager implements LinkManager {
       }
 
       // Tire assignment: known -> register; unknown -> ask the user.
-      final saved = (await _settings).getString('assign_$key');
+      final prefs = await _settings;
+      final saved = prefs.getString('assign_$key');
       if (saved != null && saved.isNotEmpty) {
         _registerTire(key, saved);
         debugPrint('BLE: $key is tire $saved');
@@ -482,6 +523,10 @@ class BleManager implements LinkManager {
       final m = {...measured.value}..remove(tire);
       measured.value = m;
     }
+    if (_chars.isEmpty) {
+      _pollTimer?.cancel();
+      _pollTimer = null;
+    }
     final tires = {...state.value.tires}..remove(tire);
     state.value = LinkState(
       phase: tires.isEmpty ? LinkPhase.disconnected : LinkPhase.connected,
@@ -522,9 +567,12 @@ class BleManager implements LinkManager {
     _notifySubs.clear();
     _pressureChars.clear();
     measured.value = const {};
+    staleTires.value = const <String>{};
     unackedBoards.value = const <String>{};
     pendingAssign.value = const <String>{};
     _keyToTire.clear();
+    _pollTimer?.cancel();
+    _pollTimer = null;
     final devices = List.of(_devices.values);
     _devices.clear();
     state.value = const LinkState();

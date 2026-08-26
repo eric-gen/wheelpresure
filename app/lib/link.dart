@@ -28,6 +28,10 @@ abstract class LinkManager {
   /// the a2 characteristic push this every ~2 s; empty when unavailable.
   ValueNotifier<Map<String, double>> get measured;
 
+  /// Linked tires whose board stopped answering the 10 s pressure poll -
+  /// values are stale and editing is locked until they recover.
+  ValueNotifier<Set<String>> get staleTires;
+
   bool get isConnected;
 
   Future<void> connect();

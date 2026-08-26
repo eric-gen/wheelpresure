@@ -103,11 +103,23 @@ class _OverviewScreenState extends State<OverviewScreen> {
         _notify('Not linked: ${missing.join(", ")} - connect first');
         return;
       }
+      final stale = [
+        for (final t in _tires)
+          if (LinkManager.instance.staleTires.value.contains(t.name)) t.name,
+      ];
+      if (stale.isNotEmpty) {
+        _notify('No live data from: ${stale.join(", ")} - cannot set');
+        return;
+      }
     } else {
       final name = _tires[index].name;
       if (!linked.contains(name)) {
         _notify('$name is not linked - trying to reconnect...');
         LinkManager.instance.reconnectOne(name);
+        return;
+      }
+      if (LinkManager.instance.staleTires.value.contains(name)) {
+        _notify('$name has no live data - cannot change its pressure');
         return;
       }
     }
@@ -433,19 +445,37 @@ class _OverviewScreenState extends State<OverviewScreen> {
               ),
               SizedBox(height: 4 * s),
               // Live measurement when the board reports one (new firmware),
-              // otherwise the last commanded value.
+              // otherwise the last commanded value. A tire whose poll fails
+              // shows "no data" in the error color and is locked.
               ValueListenableBuilder<Map<String, double>>(
                 valueListenable: LinkManager.instance.measured,
                 builder: (context, measured, _) {
-                  final live = measured[name];
-                  final shown =
-                      live != null ? '${live.toStringAsFixed(2)} bar' : '${tire.pressure.toStringAsFixed(1)} bar';
-                  return Text(
-                    shown,
-                    style: TextStyle(
-                      fontSize: (11 * s).clamp(11, 15),
-                      color: scheme.onSurfaceVariant,
-                    ),
+                  return ValueListenableBuilder<Set<String>>(
+                    valueListenable: LinkManager.instance.staleTires,
+                    builder: (context, stale, _) {
+                      final scheme = Theme.of(context).colorScheme;
+                      if (stale.contains(name)) {
+                        return Text(
+                          'no data',
+                          style: TextStyle(
+                            fontSize: (11 * s).clamp(11, 15),
+                            fontWeight: FontWeight.w600,
+                            color: scheme.error,
+                          ),
+                        );
+                      }
+                      final live = measured[name];
+                      final shown = live != null
+                          ? '${live.toStringAsFixed(2)} bar'
+                          : '${tire.pressure.toStringAsFixed(1)} bar';
+                      return Text(
+                        shown,
+                        style: TextStyle(
+                          fontSize: (11 * s).clamp(11, 15),
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      );
+                    },
                   );
                 },
               ),

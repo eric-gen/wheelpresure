@@ -35,6 +35,11 @@ except ImportError:
 
 BAUD = 115200
 
+
+def detect_ports() -> list[str]:
+    """All COM ports present on this PC."""
+    return sorted(p.device for p in list_ports.comports())
+
 # ---- ANSI colors ----------------------------------------------------------
 RESET = "\033[0m"
 DIM = "\033[2m"

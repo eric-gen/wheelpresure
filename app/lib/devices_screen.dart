@@ -25,6 +25,10 @@ class _DevicesScreenState extends State<DevicesScreen> {
   final Set<String> _assigning = {};
   Map<String, BluetoothDevice> _results = {};
 
+  /// Every board ever seen in this session - boards that disappear
+  /// (powered off, out of range) stay listed as offline with Connect.
+  final Map<String, BluetoothDevice> _seen = {};
+
   BleManager get _ble => BleManager.instance;
 
   @override
@@ -43,6 +47,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
       if (mounted) {
         setState(() {
           _results = found;
+          _seen.addAll(found);
           _error = null;
         });
       }
@@ -104,7 +109,11 @@ class _DevicesScreenState extends State<DevicesScreen> {
             valueListenable: _ble.pendingAssign,
             builder: (context, pending, _) {
               // Merge scan results + boards we know from earlier sessions.
-              final known = <String>{..._results.keys, ..._ble.discovered.keys}
+              final known = <String>{
+                ..._seen.keys,
+                ..._results.keys,
+                ..._ble.discovered.keys,
+              }
                   .where((k) => !linkState.tires.contains(_ble.tireOf(k)))
                   .toList()
                 ..sort();
@@ -180,19 +189,34 @@ class _DevicesScreenState extends State<DevicesScreen> {
                       child: Text(_error!, style: TextStyle(color: scheme.error)),
                     ),
                   for (final key in known)
-                    ListTile(
-                      leading: Icon(Icons.bluetooth_searching,
-                          color: scheme.onSurfaceVariant),
-                      title: Text('TireESP32-$key'),
-                      subtitle: Text(_ble.discovered[key]?.remoteId.str ?? ''),
-                      trailing: _busyRow(key) ??
-                          (pending.contains(key)
-                              ? null
-                              : OutlinedButton(
-                                  onPressed: () => _toggle(key),
-                                  child: const Text('Connect'),
-                                )),
-                    ),
+                    Builder(builder: (context) {
+                      final dev = _results[key] ??
+                          _seen[key] ??
+                          _ble.discovered[key];
+                      final online = _results.containsKey(key);
+                      return ListTile(
+                        leading: Icon(
+                          online
+                              ? Icons.bluetooth_searching
+                              : Icons.bluetooth_disabled,
+                          color: online
+                              ? scheme.onSurfaceVariant
+                              : scheme.outlineVariant,
+                        ),
+                        title: Text('TireESP32-$key'),
+                        subtitle: Text(
+                          '${dev?.remoteId.str ?? ''}'
+                          '${online ? '' : ' - offline'}',
+                        ),
+                        trailing: _busyRow(key) ??
+                            (pending.contains(key)
+                                ? null
+                                : OutlinedButton(
+                                    onPressed: () => _toggle(key),
+                                    child: const Text('Connect'),
+                                  )),
+                      );
+                    }),
                   if (known.isEmpty && pending.isEmpty && !_scanning)
                     const Padding(
                       padding: EdgeInsets.all(16),

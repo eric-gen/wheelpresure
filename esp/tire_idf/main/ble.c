@@ -237,8 +237,8 @@ static void advertise(void)
     struct ble_gap_adv_params advp = { 0 };
     advp.conn_mode = BLE_GAP_CONN_MODE_UND;
     advp.disc_mode = BLE_GAP_DISC_MODE_GEN;
-    advp.itvl_min  = 160; /* 100 ms */
-    advp.itvl_max  = 240; /* 150 ms */
+    advp.itvl_min  = 64; /*  40 ms - fast discovery (mini boards, weak ants) */
+    advp.itvl_max  = 120; /*  75 ms */
 
     rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL,
                            BLE_HS_FOREVER, &advp, gap_event_cb, NULL);

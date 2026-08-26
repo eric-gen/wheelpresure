@@ -2,13 +2,10 @@
  * BLE GATT server (NimBLE, ESP-IDF 5.4).
  *
  * Service  5f1d16a0-... (same as the Arduino firmware, apps are unchanged)
- *   a1 char: READ|WRITE - app writes "2.4,3.4,1.2,2.5", board stores
- *            its own slot's target and rewrites the value to "ACK:<ID>:<bar>"
- *   a2 char: READ|NOTIFY - live measured pressure "%.2f" (from pressure_sim)
- *
- * Stability features: advertising restarts after every disconnect,
- * MTU negotiation is left to NimBLE defaults, notify only goes out when
- * a client actually subscribed, all writes are bounds-checked.
+ *   a1 char: READ|WRITE - app writes "2.4,3.4,1.2,2.5" or "ASSIGN:FR";
+ *            the value becomes the reply (ACK:<ID>:<bar>, ACK:<ID>:0,
+ *            UNASSIGNED or ERR)
+ *   a2 char: READ|NOTIFY - live measured pressure "%.2f" from pressure_sim
  */
 #include <string.h>
 #include <stdio.h>
@@ -16,8 +13,11 @@
 #include <math.h>
 
 #include "host/ble_hs.h"
+#include "host/ble_gatt.h"
+#include "host/util/util.h"
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
+#include "store/config/ble_store_config.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "nvs_flash.h"
@@ -25,56 +25,56 @@
 
 #include "pressure_sim.h"
 #include "tire_pressure.h"
+#include "ble.h"
 
 char g_tire[8] = { 0 };
 
 static const ble_uuid128_t svc_uuid =
-    BLE_UUID128_INIT(TIRE_SERVICE_UUID);
+    BLE_UUID128_INIT(TIRE_SERVICE_UUID_BYTES);
 static const ble_uuid128_t cmd_chr_uuid =
-    BLE_UUID128_INIT(TIRE_CMD_CHAR_UUID);
+    BLE_UUID128_INIT(TIRE_CMD_CHAR_UUID_BYTES);
 static const ble_uuid128_t pressure_chr_uuid =
-    BLE_UUID128_INIT(TIRE_PRESSURE_CHAR_UUID);
+    BLE_UUID128_INIT(TIRE_PRESSURE_CHAR_UUID_BYTES);
 
 static uint16_t cmd_attr_handle;
 static uint16_t pressure_attr_handle;
 
-/* Connected phone(s); this board serves one connection at a time. */
+/* Connected phone; this board serves one connection at a time. */
 static uint16_t conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static bool subscribed;
 
-static void advertise(void);
+static int gap_event_cb(struct ble_gap_event *event, void *arg);
 
 /* ------------------------------------------------------------------ */
 /* a1 command characteristic                                          */
 /* ------------------------------------------------------------------ */
 
 static int cmd_access(uint16_t conn_handle, uint16_t attr_handle,
-                      struct ble_gatt_access_ctx *ctx)
+                      struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
-    static char buf[64]; /* single-threaded host task: safe */
+    static char buf[64]; /* everything runs on one host task: safe */
 
-    if (ctx->op == BLE_GATT_ACCESS_OP_READ_CHR) {
-        /* The value doubles as the ACK for the last command. */
-        return os_mbuf_append(ctx->om, buf, strlen(buf));
+    if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
+        /* The value doubles as the reply to the last command. */
+        return os_mbuf_append(ctxt->om, buf, strlen(buf));
     }
-    if (ctx->op != BLE_GATT_ACCESS_OP_WRITE_CHR) {
+    if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) {
         return BLE_ATT_ERR_UNLIKELY;
     }
 
-    uint16_t len = OS_MBUF_PKTLEN(ctx->om);
+    uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
     if (len == 0 || len >= sizeof(buf)) {
         app_log("cmd write rejected (len=%u)", len);
         return BLE_ATT_ERR_INSUFFICIENT_RES;
     }
-    ble_hs_mbuf_to_flat(ctx->om, buf, sizeof(buf) - 1, &len);
+    ble_hs_mbuf_to_flat(ctxt->om, buf, sizeof(buf) - 1, &len);
     buf[len] = '\0';
 
     /* Assignment command: "ASSIGN:FR" - persisted in NVS so the board
      * remembers its tire across reboots and power loss. */
     if (strncmp(buf, "ASSIGN:", 7) == 0) {
         const char *tire = buf + 7;
-        if (strlen(tire) >= 2 && strlen(tire) <= 3 &&
-            (strcmp(tire, "FL") == 0 || strcmp(tire, "FR") == 0 ||
+        if ((strcmp(tire, "FL") == 0 || strcmp(tire, "FR") == 0 ||
              strcmp(tire, "RL") == 0 || strcmp(tire, "RR") == 0)) {
             nvs_handle_t h;
             if (nvs_open("tirecfg", NVS_READWRITE, &h) == ESP_OK) {
@@ -92,7 +92,7 @@ static int cmd_access(uint16_t conn_handle, uint16_t attr_handle,
         return 0;
     }
 
-    /* CSV order FL,FR,RL,RR - pick the slot matching the assigned tire. */
+    /* CSV order FL,FR,RL,RR - apply the slot matching our assigned tire. */
     const char *order[4] = { "FL", "FR", "RL", "RR" };
     int my_index = -1;
     for (int i = 0; i < 4; i++) {
@@ -110,20 +110,20 @@ static int cmd_access(uint16_t conn_handle, uint16_t attr_handle,
     if (tmp) {
         int part = 0;
         for (char *tok = strtok_r(tmp, ",", &save);
-             tok && part < 4;
+             tok != NULL && part < 4;
              tok = strtok_r(NULL, ",", &save), part++) {
             if (part == my_index) slot = tok;
         }
     }
 
     float bar = NAN;
-    if (my_index >= 0 && slot) bar = strtof(slot, NULL);
+    if (slot != NULL) bar = strtof(slot, NULL);
     free(tmp);
 
     if (isnan(bar) || bar < PRESSURE_MIN || bar > PRESSURE_MAX) {
-        app_log("cmd rejected: '%s' (no valid slot %d)", buf, my_index);
+        app_log("cmd rejected: '%s' (slot %d invalid)", buf, my_index);
         strcpy(buf, "ERR");
-        return 0; /* still readable so the app can see the refusal */
+        return 0;
     }
 
     pressure_sim_set_target(bar);
@@ -137,33 +137,33 @@ static int cmd_access(uint16_t conn_handle, uint16_t attr_handle,
 /* ------------------------------------------------------------------ */
 
 static int pressure_access(uint16_t conn_handle, uint16_t attr_handle,
-                           struct ble_gatt_access_ctx *ctx)
+                           struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
-    if (ctx->op != BLE_GATT_ACCESS_OP_READ_CHR) {
+    if (ctxt->op != BLE_GATT_ACCESS_OP_READ_CHR) {
         return BLE_ATT_ERR_UNLIKELY;
     }
     char val[8];
     const int n = snprintf(val, sizeof(val), "%.2f",
                            (double)pressure_sim_get());
-    return os_mbuf_append(ctx->om, val, n);
+    return os_mbuf_append(ctxt->om, val, n);
 }
 
-/* Called by the periodic task in main.c. */
+/* Called by the periodic task in main.c every ~2 s. */
 void ble_publish_pressure(float bar)
 {
+    if (conn_handle == BLE_HS_CONN_HANDLE_NONE || !subscribed) {
+        return; /* nobody listening: NimBLE would drop it anyway */
+    }
     char val[8];
     const int n = snprintf(val, sizeof(val), "%.2f", (double)bar);
+    struct os_mbuf *om = ble_hs_mbuf_from_flat(val, n);
+    if (om == NULL) return;
+    ble_gatts_notify_custom(conn_handle, pressure_attr_handle, om);
+}
 
-    /* Store the value so plain reads also see it... */
-    ble_gatts_set_attr_value(pressure_attr_handle, n, (const uint8_t *)val);
-    /* ...then push it to the subscribed phone (NimBLE drops this silently
-     * when nobody subscribed or the connection is gone). */
-    if (conn_handle != BLE_HS_CONN_HANDLE_NONE && subscribed) {
-        struct os_mbuf *om = ble_hs_mbuf_from_flat(val, n);
-        if (om) {
-            ble_gatts_notify_custom(conn_handle, pressure_attr_handle, om);
-        }
-    }
+bool ble_is_connected(void)
+{
+    return conn_handle != BLE_HS_CONN_HANDLE_NONE;
 }
 
 /* ------------------------------------------------------------------ */
@@ -198,8 +198,8 @@ static void advertise(void)
     struct ble_gap_adv_params advp = { 0 };
     advp.conn_mode = BLE_GAP_CONN_MODE_UND;
     advp.disc_mode = BLE_GAP_DISC_MODE_GEN;
-    advp.itms_min  = 160; /* 100 ms  */
-    advp.itmx_max  = 240; /* 150 ms  */
+    advp.itvl_min  = 160; /* 100 ms */
+    advp.itvl_max  = 240; /* 150 ms */
 
     int rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL,
                                BLE_HS_FOREVER, &advp, gap_event_cb, NULL);
@@ -260,8 +260,8 @@ static void on_sync(void)
             addr_val[5], addr_val[4], addr_val[3],
             addr_val[2], addr_val[1], addr_val[0]);
 
-    /* Name: assigned tire when known, otherwise the last 4 MAC hex digits
-     * so every board is uniquely identifiable in the devices screen. */
+    /* Name: assigned tire when known, otherwise last 4 MAC hex digits so
+     * every board is uniquely identifiable in the devices screen. */
     char name[32];
     if (g_tire[0]) {
         snprintf(name, sizeof(name), "TireESP32-%s", g_tire);
@@ -322,7 +322,6 @@ void ble_start(void)
     rc = ble_gatts_add_svcs(gatt_svcs);
     assert(rc == 0);
 
-    /* The a1 value starts as an empty ACK. */
     pressure_sim_init();
 
     nimble_port_freertos_init(host_task);

@@ -12,15 +12,21 @@
  */
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
 
 #include "ble_hs.h"
 #include "ble_svc_gap.h"
 #include "ble_svc_gatt.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 
 #include "pressure_sim.h"
 #include "tire_pressure.h"
+
+char g_tire[8] = { 0 };
 
 static const ble_uuid128_t svc_uuid =
     BLE_UUID128_INIT(TIRE_SERVICE_UUID);
@@ -63,11 +69,39 @@ static int cmd_access(uint16_t conn_handle, uint16_t attr_handle,
     ble_hs_mbuf_to_flat(ctx->om, buf, sizeof(buf) - 1, &len);
     buf[len] = '\0';
 
-    /* CSV order FL,FR,RL,RR - pick the slot matching TIRE_ID. */
+    /* Assignment command: "ASSIGN:FR" - persisted in NVS so the board
+     * remembers its tire across reboots and power loss. */
+    if (strncmp(buf, "ASSIGN:", 7) == 0) {
+        const char *tire = buf + 7;
+        if (strlen(tire) >= 2 && strlen(tire) <= 3 &&
+            (strcmp(tire, "FL") == 0 || strcmp(tire, "FR") == 0 ||
+             strcmp(tire, "RL") == 0 || strcmp(tire, "RR") == 0)) {
+            nvs_handle_t h;
+            if (nvs_open("tirecfg", NVS_READWRITE, &h) == ESP_OK) {
+                nvs_set_str(h, "tire", tire);
+                nvs_commit(h);
+                nvs_close(h);
+            }
+            strlcpy(g_tire, tire, sizeof(g_tire));
+            snprintf(buf, sizeof(buf), "ACK:%s:0", g_tire);
+            app_log("assigned to tire %s (stored in NVS)", g_tire);
+        } else {
+            app_log("bad assignment: '%s'", buf);
+            strcpy(buf, "ERR");
+        }
+        return 0;
+    }
+
+    /* CSV order FL,FR,RL,RR - pick the slot matching the assigned tire. */
     const char *order[4] = { "FL", "FR", "RL", "RR" };
     int my_index = -1;
     for (int i = 0; i < 4; i++) {
-        if (strcmp(order[i], TIRE_ID) == 0) my_index = i;
+        if (strcmp(order[i], g_tire) == 0) my_index = i;
+    }
+    if (my_index < 0) {
+        app_log("no tire assigned yet - ignoring '%s'", buf);
+        strcpy(buf, "UNASSIGNED");
+        return 0;
     }
 
     char *save = NULL;
@@ -93,7 +127,7 @@ static int cmd_access(uint16_t conn_handle, uint16_t attr_handle,
     }
 
     pressure_sim_set_target(bar);
-    snprintf(buf, sizeof(buf), "ACK:%s:%.1f", TIRE_ID, (double)bar);
+    snprintf(buf, sizeof(buf), "ACK:%s:%.1f", g_tire, (double)bar);
     app_log("target %.1f bar accepted (%s)", (double)bar, buf);
     return 0;
 }
@@ -226,6 +260,18 @@ static void on_sync(void)
             addr_val[5], addr_val[4], addr_val[3],
             addr_val[2], addr_val[1], addr_val[0]);
 
+    /* Name: assigned tire when known, otherwise the last 4 MAC hex digits
+     * so every board is uniquely identifiable in the devices screen. */
+    char name[32];
+    if (g_tire[0]) {
+        snprintf(name, sizeof(name), "TireESP32-%s", g_tire);
+    } else {
+        snprintf(name, sizeof(name), "TireESP32-%02X%02X",
+                 addr_val[1], addr_val[0]);
+    }
+    ble_svc_gap_device_name_set(name);
+    app_log("advertising as '%s'", name);
+
     advertise();
 }
 
@@ -240,7 +286,7 @@ static void host_task(void *param)
     nimble_port_freertos_deinit();
 }
 
-void ble_start(const char *device_name)
+void ble_start(void)
 {
     int rc = nimble_port_init();
     if (rc != ESP_OK) {
@@ -248,11 +294,25 @@ void ble_start(const char *device_name)
         return;
     }
 
+    /* Load the assigned tire (if any) before the stack syncs: it decides
+     * both the advertised name and which CSV slot we apply. */
+    esp_err_t nrc = nvs_flash_init();
+    if (nrc == ESP_ERR_NVS_NO_FREE_PAGES ||
+        nrc == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        nvs_flash_erase();
+        nvs_flash_init();
+    }
+    nvs_handle_t h;
+    if (nvs_open("tirecfg", NVS_READONLY, &h) == ESP_OK) {
+        size_t len = sizeof(g_tire);
+        nvs_get_str(h, "tire", g_tire, &len);
+        nvs_close(h);
+    }
+    app_log("tire assignment: '%s'", g_tire[0] ? g_tire : "(none)");
+
     ble_hs_cfg.sync_cb  = on_sync;
     ble_hs_cfg.reset_cb = on_reset;
     ble_store_config_init();
-
-    ble_svc_gap_device_name_set(device_name);
 
     ble_svc_gap_init();
     ble_svc_gatt_init();

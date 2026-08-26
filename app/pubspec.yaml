@@ -12,6 +12,7 @@ dependencies:
   flutter_blue_plus: ^2.0.0
   flutter_bluetooth_serial_plus: ^0.5.5
   permission_handler: ^12.0.0
+  shared_preferences: ^2.5.5
 
 dev_dependencies:
   flutter_test:

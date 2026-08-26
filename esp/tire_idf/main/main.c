@@ -35,17 +35,12 @@ static void pressure_task(void *arg)
 
 void app_main(void)
 {
-    app_log("=== Tire %s - Pressure board (ESP-IDF) ===", TIRE_ID);
+    app_log("=== Tire pressure board (ESP-IDF) ===");
 
-    char name[32];
-    snprintf(name, sizeof(name), "TireESP32-%s", TIRE_ID);
-
-    ble_start(name);
+    ble_start();
 
     if (xTaskCreate(pressure_task, "pressure", 3072, NULL, 5, NULL)
             != pdPASS) {
         app_log("failed to create pressure task");
     }
-
-    app_log("advertising as '%s'", name);
 }

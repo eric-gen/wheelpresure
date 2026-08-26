@@ -1,24 +1,38 @@
-# WheelCompressor
+# Wielcompressor
 
-Phone app + web app that control one ESP32 board per tire (FL/FR/RL/RR)
-over Bluetooth LE. Boards receive pressures as one CSV message
-(`2.4,3.4,1.2,2.5`) and confirm with `ACK:<TIRE_ID>:<bar>`.
+Control the tire pressure of a vehicle from your phone. One ESP32 board per
+tire (FL / FR / RL / RR) receives target pressures over Bluetooth LE and
+reports back live measurements.
 
-- **New to the project?** Read [`docs/HANDBOOK.md`](docs/HANDBOOK.md) first.
-- **Wire-level protocol**: [`docs/tire_pressure_protocol.md`](docs/tire_pressure_protocol.md)
-- **Why a web app exists**: [`docs/why_offline_webapp.md`](docs/why_offline_webapp.md)
-- **iOS build**: [`docs/MAC_IOS_BUILD.md`](docs/MAC_IOS_BUILD.md)
+## Repository layout
 
-| Deliverable | Location | Notes |
-|---|---|---|
-| Flutter app | `flutter_application_1/lib` | Android APK; iOS via Xcode |
-| Web app (PWA) | `phone_app/` -> deployed from `docs/` | https://eric-gen.github.io/wheelpresure/ |
-| Board firmware | `flutter_application_1/esp32/tire_pressure_esp32s3` | Arduino sketch, set TIRE_ID per board |
-
-Quick Android build:
-
-```powershell
-$env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
-cd flutter_application_1
-flutter build apk --debug
 ```
+wielcompressor/
+├── app/     <- the Flutter phone app (Android + iOS)
+├── esp/     <- ESP32 firmware (ESP-IDF 5.4)
+└── docs/    <- documentation + the deployed web app (GitHub Pages)
+```
+
+## Documentation
+
+| Document | What it covers |
+|---|---|
+| [`docs/HANDBOOK.md`](docs/HANDBOOK.md) | **Start here** - full walkthrough for newcomers |
+| [`app/README.md`](app/README.md) | Building & running the Flutter app |
+| [`esp/README.md`](esp/README.md) | Flashing & configuring the ESP32 boards |
+| [`docs/tire_pressure_protocol.md`](docs/tire_pressure_protocol.md) | BLE wire protocol |
+| [`docs/why_offline_webapp.md`](docs/why_offline_webapp.md) | About the companion web app |
+
+## The 60-second version
+
+1. Flash each ESP32 with `esp/tire_idf` (all boards get identical firmware).
+2. Open the app -> tap the sensors icon -> connect to a board.
+3. The first time, the app asks which tire that board is. Done forever -
+   both the phone and the board remember.
+4. Set pressures on the main screen; boards confirm and report live values.
+
+## Web app
+
+A browser version (no install) lives at
+https://eric-gen.github.io/wheelpresure/ - same protocol, runs fully offline
+after first load. Source: `docs/index.html`.

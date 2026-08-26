@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS "main.c" "ble.c" "pressure_sim.c"
     INCLUDE_DIRS "."
+    PRIV_REQUIRES bt nvs_flash
 )
 
 # TIRE_ID is OPTIONAL now: boards ship unassigned and get their tire via

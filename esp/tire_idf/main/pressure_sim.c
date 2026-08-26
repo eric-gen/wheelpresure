@@ -49,8 +49,7 @@ void pressure_sim_set_target(float bar)
     s_target = clamp_bar(bar);
 }
 
-/* Called from the BLE task every tick (see ble.c). */
-void pressure_sim_tick(void) __attribute__((weak));
+/* Called from the BLE task every tick (see main.c). */
 void pressure_sim_tick(void)
 {
     const float step = 0.04f; /* bar per tick, ~compressor speed */

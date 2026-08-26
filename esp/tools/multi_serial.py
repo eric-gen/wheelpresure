@@ -2,21 +2,19 @@
 """
 Multi-board serial monitor - watch all ESP32 boards in one window.
 
-Every line is prefixed with the port name and colored per board, e.g.:
+Default view (clean):
+    [COM10 FL] measured 2.46 bar (target 2.3)
+    [COM11 FR] ACK:FR:2.3
+    [COM14 RL] phone connected
 
-    [COM11] I (1234) tire: measured 2.47 bar      <- cyan
-    [COM14] I (1234) tire: phone connected        <- green
-
-Special lines are highlighted:
-    green   = connections / ACKs / assignments (good news)
-    red     = errors, disconnects, rejections (bad news)
-    yellow  = warnings and retries
-    gray    = boot noise (ESP-ROM, load:0x..., etc.)
+Every board gets its own color - label AND text match.
+Use --all to see everything the boards print (NimBLE chatter, boot log...).
 
 Usage:
-    python multi_serial.py                 # auto-detect all COM ports
-    python multi_serial.py COM11 COM14     # only these ports
-    python multi_serial.py --no-color      # plain output (for log files)
+    python multi_serial.py                  # auto-detect all COM ports
+    python multi_serial.py COM11 COM14      # only these ports
+    python multi_serial.py --all            # show every line
+    python multi_serial.py --no-color       # plain output (for log files)
 
 Requires:  pip install pyserial
 Stop with: Ctrl+C
@@ -35,38 +33,52 @@ except ImportError:
 
 BAUD = 115200
 
-
-def detect_ports() -> list[str]:
-    """All COM ports present on this PC."""
-    return sorted(p.device for p in list_ports.comports())
-
 # ---- ANSI colors ----------------------------------------------------------
 RESET = "\033[0m"
 DIM = "\033[2m"
-COLORS = ["\033[96m", "\033[92m", "\033[95m", "\033[93m",
-          "\033[94m", "\033[91m", "\033[97m", "\033[36m"]
+BOARD_COLORS = ["\033[96m", "\033[92m", "\033[95m", "\033[93m",
+                "\033[94m", "\033[91m", "\033[97m", "\033[36m"]
+RED = "\033[91m"
+GREEN = "\033[92m"
+YELLOW = "\033[93m"
+
 USE_COLOR = "--no-color" not in sys.argv
+SHOW_ALL = "--all" in sys.argv
 
 
 def paint(text: str, color: str) -> str:
     return f"{color}{text}{RESET}" if USE_COLOR else text
 
 
-def colorize_line(line: str) -> str:
-    """Give notable lines a meaning-based highlight."""
+def semantic_color(line: str) -> str | None:
+    """Color for special lines; None = no special meaning."""
     low = line.lower()
-    if any(k in low for k in ("error", "fail", "rejected", "disconnected",
-                              "err:", "abort", "guru meditation")):
-        return paint(line, "\033[91m")                       # red
+    if any(k in low for k in ("error", "fail", "rejected", "err:",
+                              "abort", "guru meditation")):
+        return RED
     if any(k in low for k in ("ack:", "assigned", "phone connected",
                               "accepted")):
-        return paint(line, "\033[92m")                       # green
-    if any(k in low for k in ("warn", "retrying", "reconnect", "unassigned")):
-        return paint(line, "\033[93m")                       # yellow
-    if low.startswith(("esp-rom", "rst:", "load:", "entry ", "boot:",
-                       "spiwp", "mode:", "saved pc")) or "0x" in low[:12]:
-        return DIM + line + RESET                            # gray boot noise
-    return line
+        return GREEN
+    if any(k in low for k in ("warn", "retrying", "reconnect", "unassigned",
+                              "disconnected")):
+        return YELLOW
+    return None
+
+
+def is_noise(line: str) -> bool:
+    """Boot garbage and NimBLE chatter we hide by default."""
+    low = line.lower()
+    starts = ("esp-rom", "rst:", "load:", "entry ", "boot:", "spiwp",
+              "mode:", "saved pc", "elf file sha")
+    if any(low.startswith(s) for s in starts):
+        return True
+    return any(k in low for k in ("nimble:", "att_handle", "gatt procedure",
+                                  "ble_init", "phy_init", "cpu_start",
+                                  "heap_init", "partition table",
+                                  "esp_image", "spi_flash", "sleep_gpio",
+                                  "main_task", "nvs_sec", "efuse_init",
+                                  "app_init", "boot:", "serial_clockvote",
+                                  "ibs_", "device_wakeup"))
 
 
 class BoardReader(threading.Thread):
@@ -80,12 +92,14 @@ class BoardReader(threading.Thread):
         self.friendly = (BoardReader.LABELS[index]
                          if index < len(BoardReader.LABELS) else str(index + 1))
         self.prefix = f"[{port} {self.friendly}]"
-        self.color = COLORS[index % len(COLORS)]
+        self.color = BOARD_COLORS[index % len(BOARD_COLORS)]
         self.stop_flag = threading.Event()
 
     def out(self, line: str):
         tag = paint(f"{self.prefix:<16}", self.color)
-        print(f"{tag} {colorize_line(line)}", flush=True)
+        sem = semantic_color(line)
+        body = paint(line, sem) if sem else paint(line, self.color)
+        print(f"{tag} {body}", flush=True)
 
     def run(self):
         while not self.stop_flag.is_set():
@@ -99,12 +113,29 @@ class BoardReader(threading.Thread):
                             continue
                         partial += chunk
                         while "\n" in partial:
-                            line, partial = partial.split("\n", 1)
-                            if line.strip("\r"):
-                                self.out(line.rstrip())
+                            raw, partial = partial.split("\n", 1)
+                            raw = raw.rstrip()
+                            if not raw:
+                                continue
+                            low = raw.lower()
+                            interesting = (
+                                SHOW_ALL
+                                or "measured" in low
+                                or "target" in low
+                                or semantic_color(raw) is not None
+                            )
+                            if is_noise(raw):
+                                continue
+                            if interesting or SHOW_ALL:
+                                self.out(raw)
             except (serial.SerialException, OSError):
-                self.out(paint("--- port gone, retrying... ---", "\033[93m"))
+                self.out(paint("--- port gone, retrying... ---", YELLOW))
                 time.sleep(2)
+
+
+def detect_ports() -> list[str]:
+    """All COM ports present on this PC."""
+    return sorted(p.device for p in list_ports.comports())
 
 
 def main():
@@ -120,7 +151,8 @@ def main():
         r.start()
 
     header = ", ".join(f"{r.port} -> {r.friendly}" for r in readers)
-    print(f"Monitoring {len(ports)} board(s): {header}")
+    mode = "everything" if SHOW_ALL else "pressures + events only"
+    print(f"Monitoring {len(ports)} board(s) ({mode}): {header}")
     print("Ctrl+C to stop\n")
 
     try:

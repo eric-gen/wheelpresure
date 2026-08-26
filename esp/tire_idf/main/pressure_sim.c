@@ -44,6 +44,11 @@ float pressure_sim_get(void)
     return s_current;
 }
 
+float pressure_sim_target(void)
+{
+    return s_target;
+}
+
 void pressure_sim_set_target(float bar)
 {
     s_target = clamp_bar(bar);

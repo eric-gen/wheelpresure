@@ -27,8 +27,8 @@ static void pressure_task(void *arg)
         pressure_sim_tick();
         const float bar = pressure_sim_get();
         ble_publish_pressure(bar);
-        app_log("measured %.2f bar (target %.1f)", (double)bar,
-                0.0 /* target printed by sim on change only */);
+        app_log("measured %.2f bar (target %.1f)",
+                (double)bar, (double)pressure_sim_target());
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
 }

@@ -129,9 +129,15 @@ class _DevicesScreenState extends State<DevicesScreen> {
                         leading:
                             const Icon(Icons.check_circle, color: Colors.green),
                         title: Text('Tire $tire'),
-                        subtitle: Text(measured.containsKey(tire)
-                            ? '${measured[tire]!.toStringAsFixed(2)} bar - connected'
-                            : 'connected'),
+                        subtitle: Text(() {
+                          final key = _ble.keyForTire(tire);
+                          final board =
+                              key == null ? null : _ble.labelOf(key);
+                          final live = measured.containsKey(tire)
+                              ? '${measured[tire]!.toStringAsFixed(2)} bar'
+                              : 'connected';
+                          return board == null ? live : '$board - $live';
+                        }()),
                         trailing: _busyRow(tire),
                       ),
                     ),

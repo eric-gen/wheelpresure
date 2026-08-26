@@ -78,6 +78,14 @@ class BleManager implements LinkManager {
   /// Tire name currently assigned to a device key (or null).
   String? tireOf(String deviceKey) => _keyToTire[deviceKey];
 
+  /// Device key that controls the given tire (or null).
+  String? keyForTire(String tire) {
+    for (final e in _keyToTire.entries) {
+      if (e.value == tire) return e.key;
+    }
+    return null;
+  }
+
   Future<SharedPreferences> get _settings async =>
       _prefs ??= await SharedPreferences.getInstance();
 

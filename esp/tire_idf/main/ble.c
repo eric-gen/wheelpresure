@@ -304,15 +304,11 @@ static void on_sync(void)
             addr_val[5], addr_val[4], addr_val[3],
             addr_val[2], addr_val[1], addr_val[0]);
 
-    /* Name: assigned tire when known, otherwise last 4 MAC hex digits so
-     * every board is uniquely identifiable in the devices screen. */
+    /* Name NEVER contains the tire: boards are always WHC-XXYY (last 4
+     * MAC hex digits). Which tire a board controls lives in NVS and is
+     * shown in the app, not in the Bluetooth name. */
     char name[32];
-    if (g_tire[0]) {
-        snprintf(name, sizeof(name), "WHC-%s", g_tire);
-    } else {
-        snprintf(name, sizeof(name), "WHC-%02X%02X",
-                 addr_val[1], addr_val[0]);
-    }
+    snprintf(name, sizeof(name), "WHC-%02X%02X", addr_val[1], addr_val[0]);
     ble_svc_gap_device_name_set(name);
     app_log("advertising as '%s'", name);
 

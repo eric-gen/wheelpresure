@@ -1,3 +1,5 @@
+#include <stdbool.h>
+
 #pragma once
 
 /* Onboard status LED (WS2812 RGB on GPIO48 of the DevKitC).

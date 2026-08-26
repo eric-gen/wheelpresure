@@ -223,7 +223,7 @@ static void advertise(void)
 
     struct ble_hs_adv_fields rsp;
     memset(&rsp, 0, sizeof(rsp));
-    rsp.uuids128             = &svc_uuid.u;
+    rsp.uuids128             = (const ble_uuid128_t *)&svc_uuid.u;
     rsp.num_uuids128         = 1;
     rsp.uuids128_is_complete = 1;
     rc = ble_gap_adv_rsp_set_fields(&rsp);

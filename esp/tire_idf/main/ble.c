@@ -17,7 +17,6 @@
 #include "host/util/util.h"
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
-#include "store/config/ble_store_config.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "nvs_flash.h"
@@ -312,7 +311,8 @@ void ble_start(void)
 
     ble_hs_cfg.sync_cb  = on_sync;
     ble_hs_cfg.reset_cb = on_reset;
-    ble_store_config_init();
+    /* No ble_store_config_init(): we don't use bonding, just plain
+     * connections - one less moving part. */
 
     ble_svc_gap_init();
     ble_svc_gatt_init();

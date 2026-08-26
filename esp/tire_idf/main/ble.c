@@ -194,14 +194,52 @@ static const struct ble_gatt_svc_def gatt_svcs[] = {
 
 static void advertise(void)
 {
+    /* Build the advertisement explicitly:
+     *   ADV      = flags + complete device name (always visible to scanners)
+     *   SCAN_RSP = our 128-bit service UUID (doesn't fit in the ADV packet)
+     */
+    struct ble_hs_adv_fields fields;
+    memset(&fields, 0, sizeof(fields));
+
+    fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
+
+    const char *name = ble_svc_gap_device_name();
+    size_t name_len = strlen(name);
+    if (name_len <= BLE_HS_ADV_MAX_FIELD_SZ) {
+        fields.name             = (const uint8_t *)name;
+        fields.name_len         = name_len;
+        fields.name_is_complete = 1;
+    } else {
+        fields.name             = (const uint8_t *)name;
+        fields.name_len         = BLE_HS_ADV_MAX_FIELD_SZ;
+        fields.name_is_complete = 0;
+    }
+
+    int rc = ble_gap_adv_set_fields(&fields);
+    if (rc != 0) {
+        app_log("adv set fields failed rc=%d", rc);
+        return;
+    }
+
+    struct ble_hs_adv_fields rsp;
+    memset(&rsp, 0, sizeof(rsp));
+    rsp.uuids128             = &svc_uuid.u;
+    rsp.num_uuids128         = 1;
+    rsp.uuids128_is_complete = 1;
+    rc = ble_gap_adv_rsp_set_fields(&rsp);
+    if (rc != 0) {
+        app_log("adv rsp set failed rc=%d", rc);
+        return;
+    }
+
     struct ble_gap_adv_params advp = { 0 };
     advp.conn_mode = BLE_GAP_CONN_MODE_UND;
     advp.disc_mode = BLE_GAP_DISC_MODE_GEN;
     advp.itvl_min  = 160; /* 100 ms */
     advp.itvl_max  = 240; /* 150 ms */
 
-    int rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL,
-                               BLE_HS_FOREVER, &advp, gap_event_cb, NULL);
+    rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL,
+                           BLE_HS_FOREVER, &advp, gap_event_cb, NULL);
     if (rc != 0) {
         app_log("adv start failed rc=%d", rc);
     }

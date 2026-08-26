@@ -177,12 +177,18 @@ class BleManager implements LinkManager {
     }
 
     final found = <String, BluetoothDevice>{};
+    final seenNames = <String>{};
     late final StreamSubscription<List<ScanResult>> scanSub;
     scanSub = FlutterBluePlus.scanResults.listen((results) {
       for (final r in results) {
         final name = r.advertisementData.advName.isNotEmpty
             ? r.advertisementData.advName
             : r.device.platformName;
+        // Debug aid: log every advertiser once per scan.
+        final label = name.isEmpty ? '(no name)' : name;
+        if (seenNames.add(label)) {
+          debugPrint('BLE heard: "$label" ${r.device.remoteId.str}');
+        }
         final key = _keyFromName(name);
         if (key != null && !found.containsKey(key)) {
           debugPrint('BLE board found: "$name"');
